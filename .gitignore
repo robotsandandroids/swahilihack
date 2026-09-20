@@ -1,0 +1,30 @@
+# Root .gitignore for the SemaAI monorepo.
+# The frontend folder carries its own .gitignore from create-next-app.
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+*.local
+
+# --- Python (backend) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- Misc ---
+*.log
+.DS_Store
