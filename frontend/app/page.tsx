@@ -2,6 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Bus,
+  Briefcase,
+  Car,
+  Coffee,
+  Dices,
+  Hand,
+  Landmark,
+  type LucideIcon,
+  MapPin,
+  Mic,
+  Smartphone,
+  Stethoscope,
+  Store,
+  Home as HomeIcon,
+} from "lucide-react";
+import {
   ChatTurn,
   Feedback,
   Scenario,
@@ -15,6 +31,38 @@ import {
 import { useRecorder } from "@/lib/useRecorder";
 
 const VOICE_LANG = "sw-KE";
+
+const LOCATION_META: Record<string, { sw: string; icon: LucideIcon; color: string }> = {
+  market: { sw: "Sokoni", icon: Store, color: "#5DCAA5" },
+  taxi: { sw: "Teksini", icon: Car, color: "#378ADD" },
+  restaurant: { sw: "Mkahawani", icon: Coffee, color: "#EF9F27" },
+  neighbourhood: { sw: "Mtaani", icon: Hand, color: "#97C459" },
+  clinic: { sw: "Hospitalini", icon: Stethoscope, color: "#7F77DD" },
+  bank: { sw: "Benkini", icon: Landmark, color: "#5DCAA5" },
+  town: { sw: "Mjini", icon: Bus, color: "#D4537E" },
+  phone_shop: { sw: "Simukani", icon: Smartphone, color: "#7F77DD" },
+  office: { sw: "Ofisini", icon: Briefcase, color: "#378ADD" },
+  real_estate: { sw: "Nyumbani", icon: HomeIcon, color: "#97C459" },
+};
+
+function locationMeta(location: string) {
+  return LOCATION_META[location] ?? { sw: location, icon: MapPin, color: "#5DCAA5" };
+}
+
+const BEST_SCORES: Record<string, number> = {
+  "market-tomatoes": 84,
+  "taxi-fare": 76,
+  "restaurant-order": 91,
+  "greeting-older": 72,
+  "clinic-complaint": 64,
+  "directions-city": 58,
+};
+
+function scoreTextClass(score: number) {
+  if (score >= 70) return "text-positive";
+  if (score >= 50) return "text-warning";
+  return "text-[#FF8A80]";
+}
 
 function speak(text: string, enabled: boolean) {
   if (!enabled || typeof window === "undefined" || !("speechSynthesis" in window)) {
@@ -119,60 +167,68 @@ export default function Home() {
   );
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col px-4 py-6">
-      <header className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">SemaAI</h1>
-        <div className="flex items-center gap-3 text-sm">
-          <button
-            onClick={() => setTtsEnabled((v) => !v)}
-            className={`rounded-full border px-3 py-1 ${
-              ttsEnabled ? "border-black bg-black text-white" : "border-neutral-300 text-neutral-500"
-            }`}
-          >
-            Voice {ttsEnabled ? "on" : "off"}
-          </button>
-          {session && (
+    <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col p-4 sm:p-6 lg:p-10">
+      <div className="min-h-[560px] flex-1 rounded-2xl bg-panel px-4 py-6 sm:px-10 sm:py-8">
+        <header className="mb-7 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-base font-medium text-white">
+            <div className="h-[26px] w-[26px] rounded-[7px] bg-brand" />
+            Sema
+          </div>
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => {
-                setSession(null);
-                setTurns([]);
-              }}
-              className="rounded-full border border-neutral-300 px-3 py-1"
+              onClick={() => setTtsEnabled((v) => !v)}
+              className={`rounded-full border px-3 py-1 text-xs transition ${
+                ttsEnabled
+                  ? "border-brand bg-brand text-brand-fg"
+                  : "border-white/15 text-white/60 hover:text-white"
+              }`}
             >
-              New topic
+              Voice {ttsEnabled ? "on" : "off"}
             </button>
-          )}
-        </div>
-      </header>
+            {session && (
+              <button
+                onClick={() => {
+                  setSession(null);
+                  setTurns([]);
+                }}
+                className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/60 transition hover:text-white"
+              >
+                New topic
+              </button>
+            )}
+            <div className="h-8 w-8 rounded-full bg-white/[0.08]" />
+          </div>
+        </header>
 
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+        {error && (
+          <div className="mb-4 rounded-lg border border-[#FF8A80]/30 bg-[#FF8A80]/10 px-4 py-3 text-sm text-[#FF8A80]">
+            {error}
+          </div>
+        )}
 
-      {!session ? (
-        <ScenarioGrid scenarios={scenarios} busy={busy} onPick={begin} />
-      ) : (
-        <Conversation
-          session={session}
-          turns={turns}
-          recording={recording}
-          recError={recError}
-          busy={busy}
-          textInput={textInput}
-          setTextInput={setTextInput}
-          onRecord={recordAndSend}
-          onSend={sendText}
-          onReplay={replay}
-        />
-      )}
+        {!session ? (
+          <HomeMenu scenarios={scenarios} busy={busy} onPick={begin} />
+        ) : (
+          <Conversation
+            session={session}
+            turns={turns}
+            recording={recording}
+            recError={recError}
+            busy={busy}
+            textInput={textInput}
+            setTextInput={setTextInput}
+            onRecord={recordAndSend}
+            onSend={sendText}
+            onReplay={replay}
+          />
+        )}
+      </div>
       <div ref={bottomRef} />
     </main>
   );
 }
 
-function ScenarioGrid({
+function HomeMenu({
   scenarios,
   busy,
   onPick,
@@ -183,44 +239,100 @@ function ScenarioGrid({
 }) {
   if (scenarios.length === 0) {
     return (
-      <p className="text-neutral-500">
+      <p className="py-16 text-center text-sm text-white/50">
         Loading scenarios… If this stalls, is the backend running on :8000?
       </p>
     );
   }
+
+  const suggested = scenarios.find((s) => s.id === "market-tomatoes") ?? scenarios[0];
+  const suggestedMeta = locationMeta(suggested.location);
+
+  const surprise = () => {
+    const pick = scenarios[Math.floor(Math.random() * scenarios.length)];
+    onPick(pick);
+  };
+
   return (
-    <section>
-      <h2 className="mb-1 text-lg font-semibold">Choose a situation to practice</h2>
-      <p className="mb-4 text-sm text-neutral-500">
-        You play yourself; the AI plays the other person. Respond by voice.
-      </p>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {scenarios.map((s) => (
-          <button
-            key={s.id}
-            disabled={busy}
-            onClick={() => onPick(s)}
-            className="group rounded-xl border border-neutral-200 bg-white p-4 text-left transition hover:border-black disabled:opacity-50"
-          >
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-xs font-medium uppercase tracking-wide text-neutral-400">
-                {s.difficulty}
-              </span>
-              <span className="text-xs text-neutral-400">{s.title_sw}</span>
-            </div>
-            <p className="font-medium text-neutral-900">{s.title}</p>
-            <p className="mt-1 line-clamp-2 text-sm text-neutral-500">{s.context}</p>
-            <div className="mt-3 flex flex-wrap gap-1">
-              {s.key_vocab.slice(0, 5).map((v) => (
-                <span key={v} className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">
-                  {v}
-                </span>
-              ))}
-            </div>
-          </button>
-        ))}
+    <>
+      <div className="mb-1 text-xl font-medium text-white sm:text-2xl">Habari, Amara</div>
+      <p className="mb-6 text-[13px] text-white/45 sm:text-sm">Pick a scenario to practice today</p>
+
+      {/* Score summary row — two columns, matching the design */}
+      <div className="mb-7 grid grid-cols-2 gap-3">
+        <div className="rounded-xl bg-white/[0.04] px-4 py-3.5">
+          <div className="mb-1.5 text-[11px] text-white/45">Avg. score</div>
+          <div className="text-[22px] font-medium text-white">
+            78<span className="text-[13px] text-white/40">/100</span>
+          </div>
+          <div className="mt-0.5 text-[11px] text-positive">↑ 6 this week</div>
+        </div>
+        <div className="rounded-xl bg-white/[0.04] px-4 py-3.5">
+          <div className="mb-1.5 text-[11px] text-white/45">Weakest skill</div>
+          <div className="text-[22px] font-medium text-white">Grammar</div>
+          <div className="mt-0.5 text-[11px] text-warning">64% avg</div>
+        </div>
       </div>
-    </section>
+
+      {/* Suggested scenario — its own full-width band below the score row */}
+      <div className="mb-7 flex items-center justify-between gap-4 rounded-[14px] border border-brand/35 bg-gradient-to-br from-brand/[0.18] to-brand/5 px-5 py-[1.1rem]">
+        <div className="min-w-0">
+          <div className="mb-1 text-[11px] text-brand-soft">Suggested for you</div>
+          <div className="truncate text-[15px] font-medium text-white">
+            {suggestedMeta.sw} · {suggested.title}
+          </div>
+          <div className="truncate text-xs text-white/50">
+            {suggested.hint_en ?? suggested.context}
+          </div>
+        </div>
+        <button
+          disabled={busy}
+          onClick={() => onPick(suggested)}
+          className="flex shrink-0 items-center gap-1.5 rounded-full bg-brand px-[18px] py-2.5 text-[13px] font-medium text-brand-fg transition hover:brightness-110 disabled:opacity-50"
+        >
+          <Mic className="h-[15px] w-[15px]" aria-hidden />
+          Start
+        </button>
+      </div>
+
+      {/* Scenario grid — fixed 3 columns at rest-of-screen widths, matching the design */}
+      <div className="mb-2.5 text-xs text-white/50 sm:text-[13px]">All scenarios</div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {scenarios.map((s) => {
+          const meta = locationMeta(s.location);
+          const Icon = meta.icon;
+          const best = BEST_SCORES[s.id];
+          return (
+            <button
+              key={s.id}
+              disabled={busy}
+              onClick={() => onPick(s)}
+              className="flex flex-col items-start gap-2 rounded-xl bg-white/[0.04] p-3.5 text-left transition hover:bg-white/[0.08] disabled:opacity-50"
+            >
+              <Icon className="h-5 w-5" style={{ color: meta.color }} aria-hidden />
+              <span className="text-[13px] font-medium text-white">{meta.sw}</span>
+              <span className="text-[11px] text-white/45">{s.title}</span>
+              <span
+                className={`mt-auto pt-1 text-[11px] ${
+                  best != null ? scoreTextClass(best) : "text-white/35"
+                }`}
+              >
+                {best != null ? `Best: ${best}` : "Not started"}
+              </span>
+            </button>
+          );
+        })}
+
+        <button
+          disabled={busy}
+          onClick={surprise}
+          className="flex min-h-[110px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/15 bg-white/[0.02] text-white/35 transition hover:border-white/30 hover:text-white/60 disabled:opacity-50"
+        >
+          <Dices className="h-5 w-5" aria-hidden />
+          <span className="text-xs">Surprise me</span>
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -252,41 +364,41 @@ function Conversation({
     <section>
       <div className="mb-4 flex items-baseline justify-between">
         <div>
-          <h2 className="text-lg font-semibold">{session.scenario.title}</h2>
-          <p className="text-sm text-neutral-500">{session.scenario.title_sw}</p>
+          <h2 className="text-lg font-semibold text-white">{session.scenario.title}</h2>
+          <p className="text-sm text-white/45">{session.scenario.title_sw}</p>
         </div>
-        <span className="text-sm text-neutral-500">
+        <span className="text-sm text-white/50">
           {turnsLeft} turn{turnsLeft === 1 ? "" : "s"} left
         </span>
       </div>
 
       {session.scenario.hint_en && turns.length <= 1 && (
-        <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <p className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
           Hint: {session.scenario.hint_en}
         </p>
       )}
 
-      <div className="mb-4 flex min-h-[300px] flex-col gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+      <div className="mb-4 flex min-h-[300px] flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
         {turns.map((t, i) => (
           <Message key={i} turn={t} onReplay={onReplay} />
         ))}
       </div>
 
-      {recError && <p className="mb-2 text-sm text-red-600">{recError}</p>}
+      {recError && <p className="mb-2 text-sm text-[#FF8A80]">{recError}</p>}
 
       <div className="flex items-center gap-2">
         <button
           onClick={onRecord}
           disabled={busy}
           className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-white transition disabled:opacity-50 ${
-            recording ? "animate-pulse bg-red-500" : "bg-black hover:bg-neutral-800"
+            recording ? "animate-pulse bg-red-500" : "bg-brand text-brand-fg hover:brightness-110"
           }`}
           aria-label={recording ? "Stop recording" : "Record reply"}
         >
           {recording ? (
             <span className="h-3 w-3 rounded-sm bg-white" />
           ) : (
-            <MicIcon />
+            <Mic className="h-5 w-5" aria-hidden />
           )}
         </button>
         <input
@@ -296,17 +408,17 @@ function Conversation({
             if (e.key === "Enter") onSend();
           }}
           placeholder="…or type your reply in Kiswahili"
-          className="h-12 flex-1 rounded-full border border-neutral-300 bg-white px-4 text-sm outline-none focus:border-black"
+          className="h-12 flex-1 rounded-full border border-white/15 bg-white/5 px-4 text-sm text-white outline-none placeholder:text-white/40 focus:border-brand"
         />
         <button
           onClick={onSend}
           disabled={busy || !textInput.trim()}
-          className="h-12 shrink-0 rounded-full bg-black px-5 text-sm font-medium text-white disabled:opacity-40"
+          className="h-12 shrink-0 rounded-full bg-brand px-5 text-sm font-medium text-brand-fg transition hover:brightness-110 disabled:opacity-40"
         >
           Send
         </button>
       </div>
-      {busy && <p className="mt-2 text-center text-xs text-neutral-400">Listening & grading…</p>}
+      {busy && <p className="mt-2 text-center text-xs text-white/40">Listening & grading…</p>}
     </section>
   );
 }
@@ -317,19 +429,21 @@ function Message({ turn, onReplay }: { turn: ChatTurn; onReplay: (t: string) => 
     <div className={`flex ${isAi ? "justify-start" : "justify-end"}`}>
       <div
         className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
-          isAi ? "rounded-tl-sm bg-white text-neutral-900" : "rounded-tr-sm bg-black text-white"
+          isAi
+            ? "rounded-tl-sm bg-white/[0.07] text-white"
+            : "rounded-tr-sm bg-white text-[#0E1614]"
         }`}
       >
         <p>{turn.text}</p>
         {isAi && turn.translation && (
-          <p className={`mt-1 text-xs ${isAi ? "text-neutral-400" : "text-neutral-300"}`}>
+          <p className={`mt-1 text-xs ${isAi ? "text-white/45" : "text-neutral-600"}`}>
             {turn.translation}
           </p>
         )}
         {isAi && (
           <button
             onClick={() => onReplay(turn.text)}
-            className="mt-2 text-xs text-neutral-400 underline underline-offset-2 hover:text-neutral-600"
+            className="mt-2 text-xs text-white/40 underline underline-offset-2 hover:text-white/70"
           >
             replay
           </button>
@@ -342,42 +456,42 @@ function Message({ turn, onReplay }: { turn: ChatTurn; onReplay: (t: string) => 
 
 function FeedbackPanel({ feedback }: { feedback: Feedback }) {
   return (
-    <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-700">
+    <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.05] p-3 text-xs text-white/70">
       <div className="mb-2 flex items-center justify-between">
-        <span className="font-semibold text-neutral-900">{feedback.headline}</span>
+        <span className="font-semibold text-white">{feedback.headline}</span>
         <ScoreBadge label="Overall" score={feedback.score} />
       </div>
       <div className="mb-3 flex gap-3 text-[11px]">
-        <span className="text-neutral-500">Comprehension</span>
-        <span className="font-semibold">{feedback.comprehension}</span>
-        <span className="text-neutral-500">Grammar</span>
-        <span className="font-semibold">{feedback.grammar}</span>
-        <span className="text-neutral-500">Enunciation</span>
-        <span className="font-semibold">{feedback.enunciation}</span>
+        <span className="text-white/50">Comprehension</span>
+        <span className="font-semibold text-white">{feedback.comprehension}</span>
+        <span className="text-white/50">Grammar</span>
+        <span className="font-semibold text-white">{feedback.grammar}</span>
+        <span className="text-white/50">Enunciation</span>
+        <span className="font-semibold text-white">{feedback.enunciation}</span>
       </div>
       {feedback.corrections.length > 0 && (
         <div className="mb-2">
-          <p className="mb-1 font-medium text-neutral-900">Corrections</p>
+          <p className="mb-1 font-medium text-white">Corrections</p>
           {feedback.corrections.map((c, i) => (
             <p key={i} className="mb-1">
-              <s className="text-red-500">{c.original || "…"}</s>{" "}
-              <span className="font-semibold text-emerald-600">{c.corrected}</span>{" "}
-              <span className="text-neutral-500">— {c.reason}</span>
+              <s className="text-[#FF8A80]">{c.original || "…"}</s>{" "}
+              <span className="font-semibold text-positive">{c.corrected}</span>{" "}
+              <span className="text-white/50">— {c.reason}</span>
             </p>
           ))}
         </div>
       )}
       {feedback.good_points.length > 0 && (
-        <p className="mb-2 text-emerald-700">✓ {feedback.good_points.join(" · ")}</p>
+        <p className="mb-2 text-positive">✓ {feedback.good_points.join(" · ")}</p>
       )}
       {feedback.vocab.length > 0 && (
         <div className="mb-2">
-          <p className="mb-1 font-medium text-neutral-900">Word roots</p>
+          <p className="mb-1 font-medium text-white">Word roots</p>
           <div className="flex flex-wrap gap-1">
             {feedback.vocab
               .filter((v) => v.breakdown)
               .map((v, i) => (
-                <span key={i} className="rounded bg-white px-1.5 py-0.5 ring-1 ring-neutral-200">
+                <span key={i} className="rounded bg-white/5 px-1.5 py-0.5 ring-1 ring-white/10">
                   {v.word} → <b className="font-mono">{v.breakdown}</b>
                 </span>
               ))}
@@ -385,14 +499,15 @@ function FeedbackPanel({ feedback }: { feedback: Feedback }) {
         </div>
       )}
       {feedback.suggestion && (
-        <p className="italic text-neutral-500">→ {feedback.suggestion}</p>
+        <p className="italic text-white/50">→ {feedback.suggestion}</p>
       )}
     </div>
   );
 }
 
 function ScoreBadge({ label, score }: { label: string; score: number }) {
-  const color = score >= 75 ? "text-emerald-600" : score >= 50 ? "text-amber-600" : "text-red-600";
+  const color =
+    score >= 75 ? "text-positive" : score >= 50 ? "text-warning" : "text-[#FF8A80]";
   return (
     <span className={`flex items-center gap-1 font-bold ${color}`}>
       {label} {score}
@@ -422,14 +537,4 @@ async function enrichVocab(feedback: Feedback): Promise<Feedback> {
 function feedVocab(word: string, feedback: Feedback) {
   const existing = feedback.vocab.find((v) => v.word === word);
   return { word, breakdown: existing?.breakdown ?? "", note: existing?.note ?? "" };
-}
-
-function MicIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="9" y="2" width="6" height="12" rx="3" />
-      <path d="M5 10a7 7 0 0 0 14 0" />
-      <line x1="12" y1="17" x2="12" y2="22" />
-    </svg>
-  );
 }
