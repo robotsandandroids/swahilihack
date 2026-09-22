@@ -31,13 +31,40 @@ class Settings(BaseSettings):
     whisper_cloud_model: str = "whisper-1"
 
     # --- LLM ---
-    llm_provider: str = "openai"  # openai (or any OpenAI-compatible base url)
+    # "mistral" (LlamaIndex MistralAI) or "openai" (OpenAI-compatible client).
+    # Mistral is the default backend; OpenAI remains a drop-in fallback.
+    llm_provider: str = "mistral"
+
+    # Mistral (via llama-index-llms-mistralai)
+    mistral_model: str = "mistral-small-latest"
+    mistral_api_key: str | None = None
+
+    # OpenAI / OpenAI-compatible (LLM_BASE_URL for local vLLM/llama.cpp)
     llm_model: str = "gpt-4o-mini"
-    llm_base_url: str | None = None  # e.g. a local vLLM/llama.cpp endpoint
+    llm_base_url: str | None = None
     llm_max_retries: int = 2
     llm_timeout_seconds: float = 30.0
     # JSON / structured-output mode for the feedback parser
     llm_json_mode: bool = True
+
+    # Hard cap on the LLM response (tokens). Keeps Mistral free-tier billing
+    # predictable and stops rambling correction explanations. Tunable per call.
+    llm_max_tokens: int = 600
+
+    # --- Rate-limit / backoff (tenacity, Mistral path) ---
+    llm_backoff_min_seconds: float = 2.0
+    llm_backoff_max_seconds: float = 30.0
+    llm_max_attempts: int = 4
+
+    # --- Conversation memory (LlamaIndex ChatMemoryBuffer) ---
+    memory_token_limit: int = 1800
+    memory_summarize_every: int = 6  # collapse history every N user turns
+    memory_keep_recent: int = 4      # keep this many recent turns verbatim
+
+    # --- Stemmer diagnostics ---
+    # Deterministically analyze each learner utterance before the LLM call and
+    # only inject the structured error diagnostic when one is found.
+    stemmer_diagnostics: bool = True
 
     # --- Session limits ---
     session_max_turns: int = 8
@@ -50,6 +77,14 @@ class Settings(BaseSettings):
     @property
     def stt_is_cloud(self) -> bool:
         return self.stt_engine.lower() == "cloud"
+
+    @property
+    def llm_uses_mistral(self) -> bool:
+        return self.llm_provider.strip().lower() == "mistral"
+
+    @property
+    def llm_active_model(self) -> str:
+        return self.mistral_model if self.llm_uses_mistral else self.llm_model
 
 
 @lru_cache

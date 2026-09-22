@@ -16,12 +16,15 @@ Backend:
 
 ```bash
 cd backend
-cp .env.example .env        # add OPENAI_API_KEY (LLM; cloud STT only if you set STT_ENGINE=cloud)
+cp .env.example .env        # add MISTRAL_API_KEY (LLM). OPENAI_API_KEY for cloud STT / OpenAI fallback
 uv sync
 uv run uvicorn app.main:app --reload      # http://127.0.0.1:8000  (docs at /docs)
+
+# Streamlit showcase (drives the real backend pipeline, no API server needed)
+uv run streamlit run showcase/app.py
 ```
 
-Frontend:
+Frontend (on hold for now — use the showcase instead):
 
 ```bash
 cd frontend
@@ -57,8 +60,12 @@ cd backend && uv run pytest
   4-8× faster/leaner than stock Whisper. Cloud OpenAI Whisper API behind the
   `STT_ENGINE=cloud` switch. Google STT, whisper.cpp, Vosk, WhisperX are
   documented as swap-ins.
-- **LLM**: OpenAI-compatible (`gpt-4o-mini` default), JSON-mode structured
-  feedback, local-compatible via `LLM_BASE_URL`.
+- **LLM**: Mistral by default via LlamaIndex (`llama-index-llms-mistralai`),
+  OpenAI-compatible (`gpt-4o-mini`) fallback. JSON-mode structured feedback,
+  hard `max_tokens` cap, tenacity backoff on rate limits, and LlamaIndex
+  `ChatMemoryBuffer` + summarization for conversation memory.
+- **Grammar diagnostics**: a deterministic stemmer pre-pass flags tense
+  errors before the LLM call and only injects a compact note when needed.
 - **AI voice**: browser SpeechSynthesis (Swahili) today; `edge-tts` documented
   as the quality upgrade.
 

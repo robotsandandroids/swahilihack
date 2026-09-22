@@ -35,5 +35,7 @@ def health() -> dict:
         "status": "ok",
         "app": settings.app_name,
         "stt_engine": settings.stt_engine,
-        "llm_model": settings.llm_model,
+        "llm_provider": settings.llm_provider,
+        "llm_model": settings.llm_active_model,
+        "llm_max_tokens": settings.llm_max_tokens,
     }
