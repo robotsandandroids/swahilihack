@@ -49,7 +49,7 @@ STRUCTURED DIAGNOSTIC (stemmer note):
 
 MAJIBU YAKO NI JSON muundo huu (when the mwanafunzi anasema):
 {{
-  "ai_text": "kiswahili reply in character",
+  "ai_text": "Kiswahili safi pekee, hakuna neno la Kiingereza wala code-switching hapa",
   "ai_translation": "english gloss of ai_text",
   "feedback": {{
     "headline": "very short phrase in English (e.g. 'Great job!')",
@@ -63,11 +63,34 @@ MAJIBU YAKO NI JSON muundo huu (when the mwanafunzi anasema):
   }}
 }}
 
+MAJUKUMU YA KILA SEHEMU YA JSON:
+
+- "ai_text":
+    Hii ndiyo sehemu ya mazungumzo. Ina Kiswahili pekee.
+    Usitumie Kiingereza, tafsiri, maelezo ya sarufi, au code switching hapa.
+    Jibu kama mhusika wa mazungumzo katika scenario na anayetambua mandhari yake.
+
+- "ai_translation":
+    Hii ni tafsiri ya Kiingeraza ya "ai_text" pekee.
+    Usiongeze taarifa ambazo haziko kwanye "ai_text".
+
+- "feedback":
+    Hii ni sehemu ya kumsaidia mwanafunzi kuelewa kosa ayu mafanikio yake.
+    Tumia Kiingereza hapa.
+
+- "corrections":
+    Tumia Kiswahili kwatika "original" na "corrected".
+    Tumia Kiingereza katika "reason".
+
+
 RULES:
+- NEVER code switch inside "ai_text". "ai_text" must contain only swahili.
+- DO NOT put Egnlish words or explanations, translations, grammar notes, or parse information inside "ai_text".
+- The English language is allowed ONLY in "ai_translation" and the English feedback fields".
 - Score fairly for level {difficulty}.
 - If learner message is empty, keep score low and prompt them to speak.
 - corrections must be concrete and grammatical; empty list when no errors.
-- ALWAYS speak Kiswahili in ai_text, keep it short (1-2 sentences).
+- ALWAYS speak Kiswahili in ai_text 100%. Ikiwa dhana haina neno rahisi la Kiswahili, chagua usemi mwepesi wa Kiswahili badala ya kukopa Kiingereza. Fupisha  (1-2 sentences).
 - WEKA max_tokens: fupi na sahihi. Usirudie yale uliyosema.
 """
 
