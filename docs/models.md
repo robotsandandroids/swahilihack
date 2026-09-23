@@ -97,13 +97,14 @@ the pronunciation-scoring upgrade.
 
 ## TTS (the AI's voice)
 
-For now the AI's lines are spoken **client-side** with the browser
-SpeechSynthesis API using a Swahili voice (`sw-KE`) — zero infra cost.
-Browser voice quality varies by OS (Android ships good Swahili voices; some
-Linux systems have none). If quality becomes the blocker, the cleanest
-upgrade is `edge-tts` (pip) behind an optional `/api/tts` endpoint returning
-audio, with the frontend falling back to browser TTS. `gTTS` and ElevenLabs
-are alternatives but edge-tts' Swahili voice quality is the best free option.
+The AI's lines are spoken with **`edge-tts`** (Microsoft neural voices) via a
+small service (`app/services/tts.py`) exposed as `POST /api/tts` — free, no
+API key, and it returns MP3 bytes the caller plays back. Voices:
+`sw-KE-ZuriNeural` (f), `sw-KE-RafikiNeural` (m), `sw-TZ-RehemaNeural` (f),
+`sw-TZ-DaudiNeural` (m). Set `TTS_ENGINE=none` to disable. The browser
+SpeechSynthesis API remains a client-side fallback if a platform needs it;
+`gTTS` and ElevenLabs are alternatives but edge-tts' Swahili voice quality is
+the best free option.
 
 ## Where the pipeline spends time
 

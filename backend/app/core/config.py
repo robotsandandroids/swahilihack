@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     mistral_model: str = "mistral-small-latest"
     mistral_api_key: str | None = None
 
+    # Gemini (via llama-index-llms-gemini). Acts as an automatic fallback
+    # whenever the primary provider fails, or as the primary when
+    # LLM_PROVIDER=gemini.
+    gemini_model: str = "gemini-3.6-flash"
+    gemini_api_key: str | None = None
+
     # OpenAI / OpenAI-compatible (LLM_BASE_URL for local vLLM/llama.cpp)
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str | None = None
@@ -55,6 +61,9 @@ class Settings(BaseSettings):
     llm_backoff_min_seconds: float = 2.0
     llm_backoff_max_seconds: float = 30.0
     llm_max_attempts: int = 4
+    # Ceiling for a single wait, including when the provider sends a
+    # Retry-After header (keeps a pathological value from stalling a demo).
+    llm_max_wait_seconds: float = 60.0
 
     # --- Conversation memory (LlamaIndex ChatMemoryBuffer) ---
     memory_token_limit: int = 1800
@@ -65,6 +74,14 @@ class Settings(BaseSettings):
     # Deterministically analyze each learner utterance before the LLM call and
     # only inject the structured error diagnostic when one is found.
     stemmer_diagnostics: bool = True
+
+    # --- Text-to-Speech ---
+    # "edge" (Microsoft Edge neural voices, free, no key) or "none" to disable.
+    # Voice options: sw-KE-ZuriNeural (f), sw-KE-RafikiNeural (m),
+    # sw-TZ-RehemaNeural (f), sw-TZ-DaudiNeural (m).
+    tts_engine: str = "edge"
+    tts_voice: str = "sw-KE-ZuriNeural"
+    tts_rate: str = "+0%"
 
     # --- Session limits ---
     session_max_turns: int = 8
@@ -83,8 +100,20 @@ class Settings(BaseSettings):
         return self.llm_provider.strip().lower() == "mistral"
 
     @property
+    def llm_uses_gemini(self) -> bool:
+        return self.llm_provider.strip().lower() == "gemini"
+
+    @property
     def llm_active_model(self) -> str:
-        return self.mistral_model if self.llm_uses_mistral else self.llm_model
+        if self.llm_uses_mistral:
+            return self.mistral_model
+        if self.llm_uses_gemini:
+            return self.gemini_model
+        return self.llm_model
+
+    @property
+    def tts_enabled(self) -> bool:
+        return self.tts_engine.strip().lower() != "none"
 
 
 @lru_cache
