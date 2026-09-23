@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bus,
@@ -32,36 +33,37 @@ import { useRecorder } from "@/lib/useRecorder";
 
 const VOICE_LANG = "sw-KE";
 
+// SemaAI identity: greens/limes/gold only — no blue, purple, pink or orange.
 const LOCATION_META: Record<string, { sw: string; icon: LucideIcon; color: string }> = {
-  market: { sw: "Sokoni", icon: Store, color: "#5DCAA5" },
-  taxi: { sw: "Teksini", icon: Car, color: "#378ADD" },
-  restaurant: { sw: "Mkahawani", icon: Coffee, color: "#EF9F27" },
-  neighbourhood: { sw: "Mtaani", icon: Hand, color: "#97C459" },
-  clinic: { sw: "Hospitalini", icon: Stethoscope, color: "#7F77DD" },
-  bank: { sw: "Benkini", icon: Landmark, color: "#5DCAA5" },
-  town: { sw: "Mjini", icon: Bus, color: "#D4537E" },
-  phone_shop: { sw: "Simukani", icon: Smartphone, color: "#7F77DD" },
-  office: { sw: "Ofisini", icon: Briefcase, color: "#378ADD" },
-  real_estate: { sw: "Nyumbani", icon: HomeIcon, color: "#97C459" },
+  market: { sw: "Sokoni", icon: Store, color: "#C6F135" },
+  taxi: { sw: "Teksini", icon: Car, color: "#6EE7B7" },
+  restaurant: { sw: "Mkahawani", icon: Coffee, color: "#E3C067" },
+  neighbourhood: { sw: "Mtaani", icon: Hand, color: "#A3E635" },
+  clinic: { sw: "Hospitalini", icon: Stethoscope, color: "#5EEAD4" },
+  bank: { sw: "Benkini", icon: Landmark, color: "#86EFAC" },
+  town: { sw: "Mjini", icon: Bus, color: "#C6F135" },
+  phone_shop: { sw: "Simukani", icon: Smartphone, color: "#5EEAD4" },
+  office: { sw: "Ofisini", icon: Briefcase, color: "#6EE7B7" },
+  real_estate: { sw: "Nyumbani", icon: HomeIcon, color: "#A3E635" },
 };
 
 function locationMeta(location: string) {
-  return LOCATION_META[location] ?? { sw: location, icon: MapPin, color: "#5DCAA5" };
+  return LOCATION_META[location] ?? { sw: location, icon: MapPin, color: "#C6F135" };
 }
 
-const BEST_SCORES: Record<string, number> = {
-  "market-tomatoes": 84,
-  "taxi-fare": 76,
-  "restaurant-order": 91,
-  "greeting-older": 72,
-  "clinic-complaint": 64,
-  "directions-city": 58,
-};
+function scoreTier(score: number): "good" | "mid" | "needs-work" {
+  if (score >= 75) return "good";
+  if (score >= 50) return "mid";
+  return "needs-work";
+}
 
 function scoreTextClass(score: number) {
-  if (score >= 70) return "text-positive";
-  if (score >= 50) return "text-warning";
-  return "text-[#FF8A80]";
+  const tier = scoreTier(score);
+  return {
+    good: "text-positive",
+    mid: "text-warning",
+    "needs-work": "text-[#FF8A80]",
+  }[tier];
 }
 
 function speak(text: string, enabled: boolean) {
@@ -82,14 +84,39 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [textInput, setTextInput] = useState("");
   const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [scenarioLoad, setScenarioLoad] = useState<"loading" | "loaded" | "error">("loading");
   const { recording, error: recError, start, stop } = useRecorder();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!recording) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setRecordingSeconds((prev) => prev + 1);
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [recording]);
+
+  const loadScenarios = useCallback(() => {
     listScenarios()
-      .then(setScenarios)
-      .catch((e) => setError(e.message));
+      .then((data) => {
+        setScenarios(data);
+        setScenarioLoad("loaded");
+        setError(null);
+      })
+      .catch((e) => {
+        setError((e as Error).message);
+        setScenarioLoad("error");
+      });
   }, []);
+
+  useEffect(() => {
+    loadScenarios();
+  }, [loadScenarios]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -149,6 +176,7 @@ export default function Home() {
         await respondTo(blob);
       }
     } else {
+      setRecordingSeconds(0);
       await start();
     }
   }, [recording, start, stop, respondTo]);
@@ -165,6 +193,22 @@ export default function Home() {
     (text: string) => speak(text, true),
     [],
   );
+
+  if (scenarioLoad === "loading") {
+    return <SplashLoading />;
+  }
+
+  if (scenarioLoad === "error") {
+    return (
+      <ScenarioError
+        message={error}
+        onRetry={() => {
+          setScenarioLoad("loading");
+          loadScenarios();
+        }}
+      />
+    );
+  }
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col p-4 sm:p-6 lg:p-10">
@@ -213,6 +257,7 @@ export default function Home() {
             session={session}
             turns={turns}
             recording={recording}
+            recordingSeconds={recordingSeconds}
             recError={recError}
             busy={busy}
             textInput={textInput}
@@ -240,7 +285,7 @@ function HomeMenu({
   if (scenarios.length === 0) {
     return (
       <p className="py-16 text-center text-sm text-white/50">
-        Loading scenarios… If this stalls, is the backend running on :8000?
+        No practice scenarios available right now. Check back soon.
       </p>
     );
   }
@@ -326,7 +371,7 @@ function HomeMenu({
         <button
           disabled={busy}
           onClick={surprise}
-          className="flex min-h-[110px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/15 bg-white/[0.02] text-white/35 transition hover:border-white/30 hover:text-white/60 disabled:opacity-50"
+          className="flex min-h-[110px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/15 bg-white/[0.02] text-white/35 transition hover:border-brand/40 hover:text-brand-soft disabled:opacity-50"
         >
           <Dices className="h-5 w-5" aria-hidden />
           <span className="text-xs">Surprise me</span>
@@ -340,6 +385,7 @@ function Conversation({
   session,
   turns,
   recording,
+  recordingSeconds,
   recError,
   busy,
   textInput,
@@ -351,6 +397,7 @@ function Conversation({
   session: StartedSession;
   turns: ChatTurn[];
   recording: boolean;
+  recordingSeconds: number;
   recError: string | null;
   busy: boolean;
   textInput: string;
@@ -360,6 +407,8 @@ function Conversation({
   onReplay: (text: string) => void;
 }) {
   const turnsLeft = Math.max(session.max_turns - turns.filter((t) => t.role === "user").length, 0);
+  const formattedRecordingTime = `${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, "0")}`;
+
   return (
     <section>
       <div className="mb-4 flex items-baseline justify-between">
@@ -401,6 +450,20 @@ function Conversation({
             <Mic className="h-5 w-5" aria-hidden />
           )}
         </button>
+        {recording && (
+          <div className="flex items-center gap-2 rounded-full border border-brand/30 bg-brand/10 px-2 py-1 text-xs font-medium text-brand-soft">
+            <div className="flex h-4 items-end gap-1">
+              {[0, 1, 2, 3].map((bar) => (
+                <span
+                  key={bar}
+                  className="recording-bar"
+                  style={{ animationDelay: `${bar * 120}ms` }}
+                />
+              ))}
+            </div>
+            <span>{formattedRecordingTime}</span>
+          </div>
+        )}
         <input
           value={textInput}
           onChange={(e) => setTextInput(e.target.value)}
@@ -419,6 +482,43 @@ function Conversation({
         </button>
       </div>
       {busy && <p className="mt-2 text-center text-xs text-white/40">Listening & grading…</p>}
+      <style jsx>{`
+        .recording-bar {
+          display: block;
+          width: 3px;
+          border-radius: 9999px;
+          background: var(--brand);
+          animation: recording-bar 0.9s ease-in-out infinite alternate;
+          transform-origin: bottom center;
+        }
+
+        .recording-bar:nth-child(1) {
+          height: 35%;
+        }
+
+        .recording-bar:nth-child(2) {
+          height: 60%;
+        }
+
+        .recording-bar:nth-child(3) {
+          height: 85%;
+        }
+
+        .recording-bar:nth-child(4) {
+          height: 100%;
+        }
+
+        @keyframes recording-bar {
+          0% {
+            opacity: 0.35;
+            transform: scaleY(0.5);
+          }
+          100% {
+            opacity: 1;
+            transform: scaleY(1);
+          }
+        }
+      `}</style>
     </section>
   );
 }
@@ -455,6 +555,16 @@ function Message({ turn, onReplay }: { turn: ChatTurn; onReplay: (t: string) => 
 }
 
 function FeedbackPanel({ feedback }: { feedback: Feedback }) {
+  const [showAllVocab, setShowAllVocab] = useState(false);
+  const vocabEntries = feedback.vocab.filter((v) => v.breakdown);
+  const visibleVocab = showAllVocab || vocabEntries.length <= 4 ? vocabEntries : vocabEntries.slice(0, 4);
+  const tier = scoreTier(feedback.score);
+  const panelClasses = {
+    good: "border-positive/25 bg-positive/[0.08]",
+    mid: "border-warning/25 bg-warning/[0.08]",
+    "needs-work": "border-[#FF8A80]/25 bg-[#FF8A80]/[0.08]",
+  }[tier];
+
   return (
     <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.05] p-3 text-xs text-white/70">
       <div className="mb-2 flex items-center justify-between">
@@ -495,13 +605,39 @@ function FeedbackPanel({ feedback }: { feedback: Feedback }) {
                   {v.word} → <b className="font-mono">{v.breakdown}</b>
                 </span>
               ))}
+            </div>
+            {vocabEntries.length > 4 && (
+              <button
+                type="button"
+                onClick={() => setShowAllVocab((v) => !v)}
+                className="mt-2 text-[11px] text-white/50 underline underline-offset-2 hover:text-white/80"
+              >
+                {showAllVocab ? "Show less" : `Show ${vocabEntries.length - 4} more`}
+              </button>
+            )}
           </div>
-        </div>
-      )}
-      {feedback.suggestion && (
-        <p className="italic text-white/50">→ {feedback.suggestion}</p>
-      )}
-    </div>
+        )}
+        {feedback.suggestion && (
+          <p className="italic text-white/50">→ {feedback.suggestion}</p>
+        )}
+      </div>
+      <style jsx>{`
+        @keyframes feedback-panel-enter {
+          0% {
+            opacity: 0;
+            transform: translateY(8px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        .feedback-panel-enter {
+          animation: feedback-panel-enter 0.35s ease-out both;
+        }
+      `}</style>
+    </>
   );
 }
 
@@ -509,7 +645,7 @@ function ScoreBadge({ label, score }: { label: string; score: number }) {
   const color =
     score >= 75 ? "text-positive" : score >= 50 ? "text-warning" : "text-[#FF8A80]";
   return (
-    <span className={`flex items-center gap-1 font-bold ${color}`}>
+    <span className={`flex items-center gap-1 font-bold ${scoreTextClass(score)}`}>
       {label} {score}
     </span>
   );

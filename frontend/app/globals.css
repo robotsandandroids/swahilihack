@@ -1,15 +1,15 @@
 @import "tailwindcss";
 
 :root {
-  --background: #070c0b;
+  --background: #080808;
   --foreground: #ffffff;
-  --surface-1: #070c0b;
-  --panel: #0e1614;
-  --brand: #d85a30;
-  --brand-fg: #4a1b0c;
-  --brand-soft: #f0997b;
-  --positive: #97c459;
-  --warning: #ef9f27;
+  --surface-1: #080808;
+  --panel: #0a0a0a;
+  --brand: #facc15;
+  --brand-fg: #3b2d05;
+  --brand-soft: #fef3c7;
+  --positive: #4ade80;
+  --warning: #facc15;
 }
 
 @theme inline {
@@ -26,8 +26,47 @@
   --font-mono: var(--font-geist-mono);
 }
 
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Smooth entrance when the dashboard appears after the splash screen */
+.dashboard-enter {
+  animation: dashboard-enter 0.45s ease-out both;
+}
+
+@keyframes dashboard-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-enter {
+    animation: none;
+  }
+
+  body::before {
+    background: none;
+  }
+}
+
+/* Subtle green ambient glow on the dark surface */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(600px 320px at 50% -8%, rgba(198, 241, 53, 0.07), transparent 70%),
+    radial-gradient(700px 400px at 88% 108%, rgba(74, 222, 128, 0.05), transparent 70%);
 }
