@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bus,
@@ -19,11 +18,11 @@ import {
   Home as HomeIcon,
 } from "lucide-react";
 import {
-  ChatTurn,
-  Feedback,
-  Scenario,
-  StartedSession,
-  TurnResponse,
+  type ChatTurn,
+  type Feedback,
+  type Scenario,
+  type StartedSession,
+  type TurnResponse,
   listScenarios,
   startSession,
   stemWord,
@@ -34,7 +33,10 @@ import { useRecorder } from "@/lib/useRecorder";
 const VOICE_LANG = "sw-KE";
 
 // SemaAI identity: greens/limes/gold only — no blue, purple, pink or orange.
-const LOCATION_META: Record<string, { sw: string; icon: LucideIcon; color: string }> = {
+const LOCATION_META: Record<
+  string,
+  { sw: string; icon: LucideIcon; color: string }
+> = {
   market: { sw: "Sokoni", icon: Store, color: "#C6F135" },
   taxi: { sw: "Teksini", icon: Car, color: "#6EE7B7" },
   restaurant: { sw: "Mkahawani", icon: Coffee, color: "#E3C067" },
@@ -47,8 +49,20 @@ const LOCATION_META: Record<string, { sw: string; icon: LucideIcon; color: strin
   real_estate: { sw: "Nyumbani", icon: HomeIcon, color: "#A3E635" },
 };
 
+// Local placeholder scores used by the home menu.
+// These can later be replaced with real scores from the backend.
+const BEST_SCORES: Record<string, number> = {
+  "market-tomatoes": 82,
+};
+
 function locationMeta(location: string) {
-  return LOCATION_META[location] ?? { sw: location, icon: MapPin, color: "#C6F135" };
+  return (
+    LOCATION_META[location] ?? {
+      sw: location,
+      icon: MapPin,
+      color: "#C6F135",
+    }
+  );
 }
 
 function scoreTier(score: number): "good" | "mid" | "needs-work" {
@@ -59,6 +73,7 @@ function scoreTier(score: number): "good" | "mid" | "needs-work" {
 
 function scoreTextClass(score: number) {
   const tier = scoreTier(score);
+
   return {
     good: "text-positive",
     mid: "text-warning",
@@ -67,13 +82,62 @@ function scoreTextClass(score: number) {
 }
 
 function speak(text: string, enabled: boolean) {
-  if (!enabled || typeof window === "undefined" || !("speechSynthesis" in window)) {
+  if (
+    !enabled ||
+    typeof window === "undefined" ||
+    !("speechSynthesis" in window)
+  ) {
     return;
   }
+
   window.speechSynthesis.cancel();
+
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = VOICE_LANG;
+
   window.speechSynthesis.speak(utterance);
+}
+
+function SplashLoading() {
+  return (
+    <main className="flex min-h-dvh items-center justify-center bg-background">
+      <div className="text-center">
+        <div className="mx-auto mb-4 h-10 w-10 animate-pulse rounded-xl bg-brand" />
+        <p className="text-sm text-white/50">Loading Sema…</p>
+      </div>
+    </main>
+  );
+}
+
+function ScenarioError({
+  message,
+  onRetry,
+}: {
+  message: string | null;
+  onRetry: () => void;
+}) {
+  return (
+    <main className="flex min-h-dvh items-center justify-center p-6">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-panel p-6 text-center">
+        <h2 className="mb-2 text-lg font-semibold text-white">
+          Couldn’t load scenarios
+        </h2>
+
+        <p className="mb-5 text-sm text-white/50">
+          {message ||
+            "Something went wrong while loading practice scenarios."}
+        </p>
+
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-fg transition hover:brightness-110"
+        >
+          Try again
+        </button>
+      </div>
+    </main>
+  );
 }
 
 export default function Home() {
@@ -85,8 +149,12 @@ export default function Home() {
   const [textInput, setTextInput] = useState("");
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [scenarioLoad, setScenarioLoad] = useState<"loading" | "loaded" | "error">("loading");
+  const [scenarioLoad, setScenarioLoad] = useState<
+    "loading" | "loaded" | "error"
+  >("loading");
+
   const { recording, error: recError, start, stop } = useRecorder();
+
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -119,19 +187,29 @@ export default function Home() {
   }, [loadScenarios]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
   }, [turns]);
 
   const begin = useCallback(
     async (scenario: Scenario) => {
       setError(null);
       setBusy(true);
+
       try {
         const s = await startSession(scenario.id);
+
         setSession(s);
+
         setTurns([
-          { role: "ai", text: s.opening_line, translation: s.scenario.context },
+          {
+            role: "ai",
+            text: s.opening_line,
+            translation: s.scenario.context,
+          },
         ]);
+
         speak(s.opening_line, ttsEnabled);
       } catch (e) {
         setError((e as Error).message);
@@ -143,20 +221,36 @@ export default function Home() {
   );
 
   const respondTo = useCallback(
-    async (audio?: Blob, fallbackText?: string): Promise<TurnResponse | null> => {
-      if (!session) return null;
+    async (
+      audio?: Blob,
+      fallbackText?: string,
+    ): Promise<TurnResponse | null> => {
+      if (!session) {
+        return null;
+      }
+
       setBusy(true);
       setError(null);
+
       try {
-        const res = await submitTurn(session.session_id, { audio, transcript: fallbackText });
+        const res = await submitTurn(session.session_id, {
+          audio,
+          transcript: fallbackText,
+        });
+
         const aiTurn: ChatTurn = {
           role: "ai",
           text: res.ai_text,
           translation: res.ai_translation,
-          feedback: res.feedback ? await enrichVocab(res.feedback) : undefined,
+          feedback: res.feedback
+            ? await enrichVocab(res.feedback)
+            : undefined,
         };
+
         setTurns((prev) => [...prev, aiTurn]);
+
         speak(res.ai_text, ttsEnabled);
+
         return res;
       } catch (e) {
         setError((e as Error).message);
@@ -171,8 +265,16 @@ export default function Home() {
   const recordAndSend = useCallback(async () => {
     if (recording) {
       const blob = await stop();
+
       if (blob) {
-        setTurns((prev) => [...prev, { role: "user", text: "(voice reply)" }]);
+        setTurns((prev) => [
+          ...prev,
+          {
+            role: "user",
+            text: "(voice reply)",
+          },
+        ]);
+
         await respondTo(blob);
       }
     } else {
@@ -182,10 +284,22 @@ export default function Home() {
   }, [recording, start, stop, respondTo]);
 
   const sendText = useCallback(async () => {
-    if (!textInput.trim() || !session) return;
+    if (!textInput.trim() || !session) {
+      return;
+    }
+
     const txt = textInput.trim();
+
     setTextInput("");
-    setTurns((prev) => [...prev, { role: "user", text: txt }]);
+
+    setTurns((prev) => [
+      ...prev,
+      {
+        role: "user",
+        text: txt,
+      },
+    ]);
+
     await respondTo(undefined, txt);
   }, [textInput, session, respondTo]);
 
@@ -218,6 +332,7 @@ export default function Home() {
             <div className="h-[26px] w-[26px] rounded-[7px] bg-brand" />
             Sema
           </div>
+
           <div className="flex items-center gap-2">
             <button
               onClick={() => setTtsEnabled((v) => !v)}
@@ -229,6 +344,7 @@ export default function Home() {
             >
               Voice {ttsEnabled ? "on" : "off"}
             </button>
+
             {session && (
               <button
                 onClick={() => {
@@ -240,6 +356,7 @@ export default function Home() {
                 New topic
               </button>
             )}
+
             <div className="h-8 w-8 rounded-full bg-white/[0.08]" />
           </div>
         </header>
@@ -251,7 +368,11 @@ export default function Home() {
         )}
 
         {!session ? (
-          <HomeMenu scenarios={scenarios} busy={busy} onPick={begin} />
+          <HomeMenu
+            scenarios={scenarios}
+            busy={busy}
+            onPick={begin}
+          />
         ) : (
           <Conversation
             session={session}
@@ -268,6 +389,7 @@ export default function Home() {
           />
         )}
       </div>
+
       <div ref={bottomRef} />
     </main>
   );
@@ -290,63 +412,100 @@ function HomeMenu({
     );
   }
 
-  const suggested = scenarios.find((s) => s.id === "market-tomatoes") ?? scenarios[0];
+  const suggested =
+    scenarios.find((s) => s.id === "market-tomatoes") ??
+    scenarios[0];
+
   const suggestedMeta = locationMeta(suggested.location);
 
   const surprise = () => {
-    const pick = scenarios[Math.floor(Math.random() * scenarios.length)];
+    const pick =
+      scenarios[Math.floor(Math.random() * scenarios.length)];
+
     onPick(pick);
   };
 
   return (
     <>
-      <div className="mb-1 text-xl font-medium text-white sm:text-2xl">Habari, Amara</div>
-      <p className="mb-6 text-[13px] text-white/45 sm:text-sm">Pick a scenario to practice today</p>
+      <div className="mb-1 text-xl font-medium text-white sm:text-2xl">
+        Habari, Amara
+      </div>
 
-      {/* Score summary row — two columns, matching the design */}
+      <p className="mb-6 text-[13px] text-white/45 sm:text-sm">
+        Pick a scenario to practice today
+      </p>
+
       <div className="mb-7 grid grid-cols-2 gap-3">
         <div className="rounded-xl bg-white/[0.04] px-4 py-3.5">
-          <div className="mb-1.5 text-[11px] text-white/45">Avg. score</div>
-          <div className="text-[22px] font-medium text-white">
-            78<span className="text-[13px] text-white/40">/100</span>
+          <div className="mb-1.5 text-[11px] text-white/45">
+            Avg. score
           </div>
-          <div className="mt-0.5 text-[11px] text-positive">↑ 6 this week</div>
+
+          <div className="text-[22px] font-medium text-white">
+            78
+            <span className="text-[13px] text-white/40">
+              /100
+            </span>
+          </div>
+
+          <div className="mt-0.5 text-[11px] text-positive">
+            ↑ 6 this week
+          </div>
         </div>
+
         <div className="rounded-xl bg-white/[0.04] px-4 py-3.5">
-          <div className="mb-1.5 text-[11px] text-white/45">Weakest skill</div>
-          <div className="text-[22px] font-medium text-white">Grammar</div>
-          <div className="mt-0.5 text-[11px] text-warning">64% avg</div>
+          <div className="mb-1.5 text-[11px] text-white/45">
+            Weakest skill
+          </div>
+
+          <div className="text-[22px] font-medium text-white">
+            Grammar
+          </div>
+
+          <div className="mt-0.5 text-[11px] text-warning">
+            64% avg
+          </div>
         </div>
       </div>
 
-      {/* Suggested scenario — its own full-width band below the score row */}
       <div className="mb-7 flex items-center justify-between gap-4 rounded-[14px] border border-brand/35 bg-gradient-to-br from-brand/[0.18] to-brand/5 px-5 py-[1.1rem]">
         <div className="min-w-0">
-          <div className="mb-1 text-[11px] text-brand-soft">Suggested for you</div>
+          <div className="mb-1 text-[11px] text-brand-soft">
+            Suggested for you
+          </div>
+
           <div className="truncate text-[15px] font-medium text-white">
             {suggestedMeta.sw} · {suggested.title}
           </div>
+
           <div className="truncate text-xs text-white/50">
             {suggested.hint_en ?? suggested.context}
           </div>
         </div>
+
         <button
           disabled={busy}
           onClick={() => onPick(suggested)}
           className="flex shrink-0 items-center gap-1.5 rounded-full bg-brand px-[18px] py-2.5 text-[13px] font-medium text-brand-fg transition hover:brightness-110 disabled:opacity-50"
         >
-          <Mic className="h-[15px] w-[15px]" aria-hidden />
+          <Mic
+            className="h-[15px] w-[15px]"
+            aria-hidden
+          />
           Start
         </button>
       </div>
 
-      {/* Scenario grid — fixed 3 columns at rest-of-screen widths, matching the design */}
-      <div className="mb-2.5 text-xs text-white/50 sm:text-[13px]">All scenarios</div>
+      <div className="mb-2.5 text-xs text-white/50 sm:text-[13px]">
+        All scenarios
+      </div>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {scenarios.map((s) => {
           const meta = locationMeta(s.location);
           const Icon = meta.icon;
           const best = BEST_SCORES[s.id];
+
           return (
             <button
               key={s.id}
@@ -354,15 +513,30 @@ function HomeMenu({
               onClick={() => onPick(s)}
               className="flex flex-col items-start gap-2 rounded-xl bg-white/[0.04] p-3.5 text-left transition hover:bg-white/[0.08] disabled:opacity-50"
             >
-              <Icon className="h-5 w-5" style={{ color: meta.color }} aria-hidden />
-              <span className="text-[13px] font-medium text-white">{meta.sw}</span>
-              <span className="text-[11px] text-white/45">{s.title}</span>
+              <Icon
+                className="h-5 w-5"
+                style={{ color: meta.color }}
+                aria-hidden
+              />
+
+              <span className="text-[13px] font-medium text-white">
+                {meta.sw}
+              </span>
+
+              <span className="text-[11px] text-white/45">
+                {s.title}
+              </span>
+
               <span
                 className={`mt-auto pt-1 text-[11px] ${
-                  best != null ? scoreTextClass(best) : "text-white/35"
+                  best != null
+                    ? scoreTextClass(best)
+                    : "text-white/35"
                 }`}
               >
-                {best != null ? `Best: ${best}` : "Not started"}
+                {best != null
+                  ? `Best: ${best}`
+                  : "Not started"}
               </span>
             </button>
           );
@@ -373,8 +547,14 @@ function HomeMenu({
           onClick={surprise}
           className="flex min-h-[110px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/15 bg-white/[0.02] text-white/35 transition hover:border-brand/40 hover:text-brand-soft disabled:opacity-50"
         >
-          <Dices className="h-5 w-5" aria-hidden />
-          <span className="text-xs">Surprise me</span>
+          <Dices
+            className="h-5 w-5"
+            aria-hidden
+          />
+
+          <span className="text-xs">
+            Surprise me
+          </span>
         </button>
       </div>
     </>
@@ -406,18 +586,32 @@ function Conversation({
   onSend: () => void;
   onReplay: (text: string) => void;
 }) {
-  const turnsLeft = Math.max(session.max_turns - turns.filter((t) => t.role === "user").length, 0);
-  const formattedRecordingTime = `${Math.floor(recordingSeconds / 60)}:${String(recordingSeconds % 60).padStart(2, "0")}`;
+  const turnsLeft = Math.max(
+    session.max_turns -
+      turns.filter((t) => t.role === "user").length,
+    0,
+  );
+
+  const formattedRecordingTime = `${Math.floor(
+    recordingSeconds / 60,
+  )}:${String(recordingSeconds % 60).padStart(2, "0")}`;
 
   return (
     <section>
       <div className="mb-4 flex items-baseline justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-white">{session.scenario.title}</h2>
-          <p className="text-sm text-white/45">{session.scenario.title_sw}</p>
+          <h2 className="text-lg font-semibold text-white">
+            {session.scenario.title}
+          </h2>
+
+          <p className="text-sm text-white/45">
+            {session.scenario.title_sw}
+          </p>
         </div>
+
         <span className="text-sm text-white/50">
-          {turnsLeft} turn{turnsLeft === 1 ? "" : "s"} left
+          {turnsLeft} turn
+          {turnsLeft === 1 ? "" : "s"} left
         </span>
       </div>
 
@@ -429,27 +623,45 @@ function Conversation({
 
       <div className="mb-4 flex min-h-[300px] flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4">
         {turns.map((t, i) => (
-          <Message key={i} turn={t} onReplay={onReplay} />
+          <Message
+            key={i}
+            turn={t}
+            onReplay={onReplay}
+          />
         ))}
       </div>
 
-      {recError && <p className="mb-2 text-sm text-[#FF8A80]">{recError}</p>}
+      {recError && (
+        <p className="mb-2 text-sm text-[#FF8A80]">
+          {recError}
+        </p>
+      )}
 
       <div className="flex items-center gap-2">
         <button
           onClick={onRecord}
           disabled={busy}
           className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-white transition disabled:opacity-50 ${
-            recording ? "animate-pulse bg-red-500" : "bg-brand text-brand-fg hover:brightness-110"
+            recording
+              ? "animate-pulse bg-red-500"
+              : "bg-brand text-brand-fg hover:brightness-110"
           }`}
-          aria-label={recording ? "Stop recording" : "Record reply"}
+          aria-label={
+            recording
+              ? "Stop recording"
+              : "Record reply"
+          }
         >
           {recording ? (
             <span className="h-3 w-3 rounded-sm bg-white" />
           ) : (
-            <Mic className="h-5 w-5" aria-hidden />
+            <Mic
+              className="h-5 w-5"
+              aria-hidden
+            />
           )}
         </button>
+
         {recording && (
           <div className="flex items-center gap-2 rounded-full border border-brand/30 bg-brand/10 px-2 py-1 text-xs font-medium text-brand-soft">
             <div className="flex h-4 items-end gap-1">
@@ -457,22 +669,31 @@ function Conversation({
                 <span
                   key={bar}
                   className="recording-bar"
-                  style={{ animationDelay: `${bar * 120}ms` }}
+                  style={{
+                    animationDelay: `${bar * 120}ms`,
+                  }}
                 />
               ))}
             </div>
+
             <span>{formattedRecordingTime}</span>
           </div>
         )}
+
         <input
           value={textInput}
-          onChange={(e) => setTextInput(e.target.value)}
+          onChange={(e) =>
+            setTextInput(e.target.value)
+          }
           onKeyDown={(e) => {
-            if (e.key === "Enter") onSend();
+            if (e.key === "Enter") {
+              onSend();
+            }
           }}
           placeholder="…or type your reply in Kiswahili"
           className="h-12 flex-1 rounded-full border border-white/15 bg-white/5 px-4 text-sm text-white outline-none placeholder:text-white/40 focus:border-brand"
         />
+
         <button
           onClick={onSend}
           disabled={busy || !textInput.trim()}
@@ -481,7 +702,13 @@ function Conversation({
           Send
         </button>
       </div>
-      {busy && <p className="mt-2 text-center text-xs text-white/40">Listening & grading…</p>}
+
+      {busy && (
+        <p className="mt-2 text-center text-xs text-white/40">
+          Listening & grading…
+        </p>
+      )}
+
       <style jsx>{`
         .recording-bar {
           display: block;
@@ -513,6 +740,7 @@ function Conversation({
             opacity: 0.35;
             transform: scaleY(0.5);
           }
+
           100% {
             opacity: 1;
             transform: scaleY(1);
@@ -523,10 +751,21 @@ function Conversation({
   );
 }
 
-function Message({ turn, onReplay }: { turn: ChatTurn; onReplay: (t: string) => void }) {
+function Message({
+  turn,
+  onReplay,
+}: {
+  turn: ChatTurn;
+  onReplay: (t: string) => void;
+}) {
   const isAi = turn.role === "ai";
+
   return (
-    <div className={`flex ${isAi ? "justify-start" : "justify-end"}`}>
+    <div
+      className={`flex ${
+        isAi ? "justify-start" : "justify-end"
+      }`}
+    >
       <div
         className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
           isAi
@@ -535,11 +774,19 @@ function Message({ turn, onReplay }: { turn: ChatTurn; onReplay: (t: string) => 
         }`}
       >
         <p>{turn.text}</p>
+
         {isAi && turn.translation && (
-          <p className={`mt-1 text-xs ${isAi ? "text-white/45" : "text-neutral-600"}`}>
+          <p
+            className={`mt-1 text-xs ${
+              isAi
+                ? "text-white/45"
+                : "text-neutral-600"
+            }`}
+          >
             {turn.translation}
           </p>
         )}
+
         {isAi && (
           <button
             onClick={() => onReplay(turn.text)}
@@ -548,85 +795,168 @@ function Message({ turn, onReplay }: { turn: ChatTurn; onReplay: (t: string) => 
             replay
           </button>
         )}
-        {turn.feedback && <FeedbackPanel feedback={turn.feedback} />}
+
+        {turn.feedback && (
+          <FeedbackPanel
+            feedback={turn.feedback}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-function FeedbackPanel({ feedback }: { feedback: Feedback }) {
-  const [showAllVocab, setShowAllVocab] = useState(false);
-  const vocabEntries = feedback.vocab.filter((v) => v.breakdown);
-  const visibleVocab = showAllVocab || vocabEntries.length <= 4 ? vocabEntries : vocabEntries.slice(0, 4);
+function FeedbackPanel({
+  feedback,
+}: {
+  feedback: Feedback;
+}) {
+  const [showAllVocab, setShowAllVocab] =
+    useState(false);
+
+  const vocabEntries = feedback.vocab.filter(
+    (v) => v.breakdown,
+  );
+
+  const visibleVocab =
+    showAllVocab || vocabEntries.length <= 4
+      ? vocabEntries
+      : vocabEntries.slice(0, 4);
+
   const tier = scoreTier(feedback.score);
+
   const panelClasses = {
     good: "border-positive/25 bg-positive/[0.08]",
     mid: "border-warning/25 bg-warning/[0.08]",
-    "needs-work": "border-[#FF8A80]/25 bg-[#FF8A80]/[0.08]",
+    "needs-work":
+      "border-[#FF8A80]/25 bg-[#FF8A80]/[0.08]",
   }[tier];
 
   return (
-    <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.05] p-3 text-xs text-white/70">
+    <div
+      className={`mt-3 rounded-xl border p-3 text-xs text-white/70 ${panelClasses} feedback-panel-enter`}
+    >
       <div className="mb-2 flex items-center justify-between">
-        <span className="font-semibold text-white">{feedback.headline}</span>
-        <ScoreBadge label="Overall" score={feedback.score} />
+        <span className="font-semibold text-white">
+          {feedback.headline}
+        </span>
+
+        <ScoreBadge
+          label="Overall"
+          score={feedback.score}
+        />
       </div>
+
       <div className="mb-3 flex gap-3 text-[11px]">
-        <span className="text-white/50">Comprehension</span>
-        <span className="font-semibold text-white">{feedback.comprehension}</span>
-        <span className="text-white/50">Grammar</span>
-        <span className="font-semibold text-white">{feedback.grammar}</span>
-        <span className="text-white/50">Enunciation</span>
-        <span className="font-semibold text-white">{feedback.enunciation}</span>
+        <span className="text-white/50">
+          Comprehension
+        </span>
+
+        <span className="font-semibold text-white">
+          {feedback.comprehension}
+        </span>
+
+        <span className="text-white/50">
+          Grammar
+        </span>
+
+        <span className="font-semibold text-white">
+          {feedback.grammar}
+        </span>
+
+        <span className="text-white/50">
+          Enunciation
+        </span>
+
+        <span className="font-semibold text-white">
+          {feedback.enunciation}
+        </span>
       </div>
+
       {feedback.corrections.length > 0 && (
         <div className="mb-2">
-          <p className="mb-1 font-medium text-white">Corrections</p>
+          <p className="mb-1 font-medium text-white">
+            Corrections
+          </p>
+
           {feedback.corrections.map((c, i) => (
-            <p key={i} className="mb-1">
-              <s className="text-[#FF8A80]">{c.original || "…"}</s>{" "}
-              <span className="font-semibold text-positive">{c.corrected}</span>{" "}
-              <span className="text-white/50">— {c.reason}</span>
+            <p
+              key={i}
+              className="mb-1"
+            >
+              <s className="text-[#FF8A80]">
+                {c.original || "…"}
+              </s>{" "}
+
+              <span className="font-semibold text-positive">
+                {c.corrected}
+              </span>{" "}
+
+              <span className="text-white/50">
+                — {c.reason}
+              </span>
             </p>
           ))}
         </div>
       )}
+
       {feedback.good_points.length > 0 && (
-        <p className="mb-2 text-positive">✓ {feedback.good_points.join(" · ")}</p>
+        <p className="mb-2 text-positive">
+          ✓ {feedback.good_points.join(" · ")}
+        </p>
       )}
+
       {feedback.vocab.length > 0 && (
         <div className="mb-2">
-          <p className="mb-1 font-medium text-white">Word roots</p>
+          <p className="mb-1 font-medium text-white">
+            Word roots
+          </p>
+
           <div className="flex flex-wrap gap-1">
-            {feedback.vocab
-              .filter((v) => v.breakdown)
-              .map((v, i) => (
-                <span key={i} className="rounded bg-white/5 px-1.5 py-0.5 ring-1 ring-white/10">
-                  {v.word} → <b className="font-mono">{v.breakdown}</b>
-                </span>
-              ))}
-            </div>
-            {vocabEntries.length > 4 && (
-              <button
-                type="button"
-                onClick={() => setShowAllVocab((v) => !v)}
-                className="mt-2 text-[11px] text-white/50 underline underline-offset-2 hover:text-white/80"
+            {visibleVocab.map((v, i) => (
+              <span
+                key={i}
+                className="rounded bg-white/5 px-1.5 py-0.5 ring-1 ring-white/10"
               >
-                {showAllVocab ? "Show less" : `Show ${vocabEntries.length - 4} more`}
-              </button>
-            )}
+                {v.word} →{" "}
+                <b className="font-mono">
+                  {v.breakdown}
+                </b>
+              </span>
+            ))}
           </div>
-        )}
-        {feedback.suggestion && (
-          <p className="italic text-white/50">→ {feedback.suggestion}</p>
-        )}
-      </div>
+
+          {vocabEntries.length > 4 && (
+            <button
+              type="button"
+              onClick={() =>
+                setShowAllVocab((v) => !v)
+              }
+              className="mt-2 text-[11px] text-white/50 underline underline-offset-2 hover:text-white/80"
+            >
+              {showAllVocab
+                ? "Show less"
+                : `Show ${
+                    vocabEntries.length - 4
+                  } more`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {feedback.suggestion && (
+        <p className="italic text-white/50">
+          → {feedback.suggestion}
+        </p>
+      )}
+
       <style jsx>{`
         @keyframes feedback-panel-enter {
           0% {
             opacity: 0;
             transform: translateY(8px);
           }
+
           100% {
             opacity: 1;
             transform: translateY(0);
@@ -637,40 +967,75 @@ function FeedbackPanel({ feedback }: { feedback: Feedback }) {
           animation: feedback-panel-enter 0.35s ease-out both;
         }
       `}</style>
-    </>
+    </div>
   );
 }
 
-function ScoreBadge({ label, score }: { label: string; score: number }) {
-  const color =
-    score >= 75 ? "text-positive" : score >= 50 ? "text-warning" : "text-[#FF8A80]";
+function ScoreBadge({
+  label,
+  score,
+}: {
+  label: string;
+  score: number;
+}) {
   return (
-    <span className={`flex items-center gap-1 font-bold ${scoreTextClass(score)}`}>
+    <span
+      className={`flex items-center gap-1 font-bold ${scoreTextClass(
+        score,
+      )}`}
+    >
       {label} {score}
     </span>
   );
 }
 
-async function enrichVocab(feedback: Feedback): Promise<Feedback> {
+async function enrichVocab(
+  feedback: Feedback,
+): Promise<Feedback> {
   try {
-    const words = [...new Set(feedback.vocab.map((v) => v.word))].filter(Boolean);
+    const words = [
+      ...new Set(
+        feedback.vocab.map((v) => v.word),
+      ),
+    ].filter(Boolean);
+
     const enriched = await Promise.all(
       words.map(async (w) => {
         try {
           const stem = await stemWord(w);
-          return { ...feedVocab(w, feedback), breakdown: stem.breakdown };
+
+          return {
+            ...feedVocab(w, feedback),
+            breakdown: stem.breakdown,
+          };
         } catch {
           return feedVocab(w, feedback);
         }
       }),
     );
-    return { ...feedback, vocab: enriched.length ? enriched : feedback.vocab };
+
+    return {
+      ...feedback,
+      vocab: enriched.length
+        ? enriched
+        : feedback.vocab,
+    };
   } catch {
     return feedback;
   }
 }
 
-function feedVocab(word: string, feedback: Feedback) {
-  const existing = feedback.vocab.find((v) => v.word === word);
-  return { word, breakdown: existing?.breakdown ?? "", note: existing?.note ?? "" };
+function feedVocab(
+  word: string,
+  feedback: Feedback,
+) {
+  const existing = feedback.vocab.find(
+    (v) => v.word === word,
+  );
+
+  return {
+    word,
+    breakdown: existing?.breakdown ?? "",
+    note: existing?.note ?? "",
+  };
 }
