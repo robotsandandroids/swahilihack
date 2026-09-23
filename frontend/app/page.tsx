@@ -211,11 +211,11 @@ export default function Home() {
   }
 
   return (
-    <main className="dashboard-enter mx-auto flex min-h-dvh w-full max-w-5xl flex-col p-4 sm:p-6 lg:p-10">
+    <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col p-4 sm:p-6 lg:p-10">
       <div className="min-h-[560px] flex-1 rounded-2xl bg-panel px-4 py-6 sm:px-10 sm:py-8">
         <header className="mb-7 flex items-center justify-between">
           <div className="flex items-center gap-2 text-base font-medium text-white">
-            <div className="h-[26px] w-[26px] rounded-[7px] bg-brand shadow-[0_0_18px_rgba(198,241,53,0.35)]" />
+            <div className="h-[26px] w-[26px] rounded-[7px] bg-brand" />
             Sema
           </div>
           <div className="flex items-center gap-2">
@@ -269,138 +269,6 @@ export default function Home() {
         )}
       </div>
       <div ref={bottomRef} />
-    </main>
-  );
-}
-
-function SplashLoading() {
-  return (
-    <main
-      role="status"
-      aria-live="polite"
-      className="flex min-h-dvh flex-col items-center justify-center bg-[#080808] px-6"
-    >
-      <Image
-        src="/sema-logo.png"
-        alt="SemaAI"
-        width={168}
-        height={161}
-        priority
-        className="select-none drop-shadow-[0_0_28px_rgba(198,241,53,0.18)]"
-      />
-
-      <div className="relative mt-12 flex h-28 w-28 items-center justify-center" aria-hidden>
-        <span className="orb-ripple absolute h-16 w-16 rounded-full border border-brand/40" />
-        <span
-          className="orb-ripple absolute h-16 w-16 rounded-full border border-brand/25"
-          style={{ animationDelay: "0.9s" }}
-        />
-        <span
-          className="orb-ripple absolute h-16 w-16 rounded-full border border-brand/15"
-          style={{ animationDelay: "1.8s" }}
-        />
-        <span className="orb-breathe h-12 w-12 rounded-full bg-brand shadow-[0_0_28px_rgba(198,241,53,0.55),0_0_64px_rgba(198,241,53,0.22)]" />
-      </div>
-
-      <p className="mt-10 text-sm text-white/70">Getting your practice ready...</p>
-
-      <div className="mt-3 flex items-center gap-1.5" aria-hidden>
-        <span className="loading-dot h-1.5 w-1.5 rounded-full bg-brand/90" />
-        <span className="loading-dot h-1.5 w-1.5 rounded-full bg-brand/60" style={{ animationDelay: "0.2s" }} />
-        <span className="loading-dot h-1.5 w-1.5 rounded-full bg-white/25" style={{ animationDelay: "0.4s" }} />
-      </div>
-
-      <style jsx>{`
-        .orb-breathe {
-          animation: orb-breathe 2.6s ease-in-out infinite;
-        }
-
-        @keyframes orb-breathe {
-          0%,
-          100% {
-            opacity: 0.85;
-            transform: scale(1);
-          }
-          50% {
-            opacity: 1;
-            transform: scale(1.12);
-          }
-        }
-
-        .orb-ripple {
-          opacity: 0;
-          animation: orb-ripple 2.7s ease-out infinite;
-        }
-
-        @keyframes orb-ripple {
-          0% {
-            opacity: 0.7;
-            transform: scale(0.55);
-          }
-          70% {
-            opacity: 0.15;
-          }
-          100% {
-            opacity: 0;
-            transform: scale(1.7);
-          }
-        }
-
-        .loading-dot {
-          animation: loading-dot 1.2s ease-in-out infinite;
-        }
-
-        @keyframes loading-dot {
-          0%,
-          100% {
-            opacity: 0.35;
-            transform: translateY(0);
-          }
-          50% {
-            opacity: 1;
-            transform: translateY(-3px);
-          }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          .orb-breathe,
-          .loading-dot {
-            animation: none;
-          }
-
-          .orb-ripple {
-            animation: none;
-            opacity: 0.25;
-          }
-        }
-      `}</style>
-    </main>
-  );
-}
-
-function ScenarioError({ message, onRetry }: { message: string | null; onRetry: () => void }) {
-  return (
-    <main className="flex min-h-dvh flex-col items-center justify-center bg-[#080808] px-6 text-center">
-      <Image
-        src="/sema-logo.png"
-        alt="SemaAI"
-        width={112}
-        height={107}
-        priority
-        className="select-none"
-      />
-
-      <p className="mt-8 text-base font-medium text-white">Couldn&apos;t load your practice scenarios.</p>
-      <p className="mt-2 max-w-sm text-xs leading-relaxed text-white/40">
-        {message ?? "Please check your connection and try again."}
-      </p>
-
-      <button
-        onClick={onRetry}
-        className="mt-7 rounded-full bg-brand px-6 py-2.5 text-sm font-medium text-brand-fg transition hover:brightness-110"
-      >
-        Try again
-      </button>
     </main>
   );
 }
@@ -478,6 +346,7 @@ function HomeMenu({
         {scenarios.map((s) => {
           const meta = locationMeta(s.location);
           const Icon = meta.icon;
+          const best = BEST_SCORES[s.id];
           return (
             <button
               key={s.id}
@@ -488,8 +357,12 @@ function HomeMenu({
               <Icon className="h-5 w-5" style={{ color: meta.color }} aria-hidden />
               <span className="text-[13px] font-medium text-white">{meta.sw}</span>
               <span className="text-[11px] text-white/45">{s.title}</span>
-              <span className="mt-auto pt-1 text-[11px] capitalize text-white/35">
-                {s.difficulty}
+              <span
+                className={`mt-auto pt-1 text-[11px] ${
+                  best != null ? scoreTextClass(best) : "text-white/35"
+                }`}
+              >
+                {best != null ? `Best: ${best}` : "Not started"}
               </span>
             </button>
           );
@@ -567,9 +440,7 @@ function Conversation({
           onClick={onRecord}
           disabled={busy}
           className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-white transition disabled:opacity-50 ${
-            recording
-              ? "animate-pulse bg-red-500 shadow-[0_0_20px_rgba(255,60,60,0.45)]"
-              : "bg-brand text-brand-fg hover:brightness-110"
+            recording ? "animate-pulse bg-red-500" : "bg-brand text-brand-fg hover:brightness-110"
           }`}
           aria-label={recording ? "Stop recording" : "Record reply"}
         >
@@ -660,12 +531,12 @@ function Message({ turn, onReplay }: { turn: ChatTurn; onReplay: (t: string) => 
         className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
           isAi
             ? "rounded-tl-sm bg-white/[0.07] text-white"
-            : "rounded-tr-sm bg-brand text-brand-fg"
+            : "rounded-tr-sm bg-white text-[#0E1614]"
         }`}
       >
         <p>{turn.text}</p>
         {isAi && turn.translation && (
-          <p className={`mt-1 text-xs ${isAi ? "text-white/45" : "text-brand-fg/60"}`}>
+          <p className={`mt-1 text-xs ${isAi ? "text-white/45" : "text-neutral-600"}`}>
             {turn.translation}
           </p>
         )}
@@ -695,40 +566,41 @@ function FeedbackPanel({ feedback }: { feedback: Feedback }) {
   }[tier];
 
   return (
-    <>
-      <div className={`feedback-panel-enter mt-3 rounded-xl border p-3 text-xs text-white/70 ${panelClasses}`}>
-        <div className="mb-2 flex items-center justify-between">
-          <span className="font-semibold text-white">{feedback.headline}</span>
-          <ScoreBadge label="Overall" score={feedback.score} />
+    <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.05] p-3 text-xs text-white/70">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="font-semibold text-white">{feedback.headline}</span>
+        <ScoreBadge label="Overall" score={feedback.score} />
+      </div>
+      <div className="mb-3 flex gap-3 text-[11px]">
+        <span className="text-white/50">Comprehension</span>
+        <span className="font-semibold text-white">{feedback.comprehension}</span>
+        <span className="text-white/50">Grammar</span>
+        <span className="font-semibold text-white">{feedback.grammar}</span>
+        <span className="text-white/50">Enunciation</span>
+        <span className="font-semibold text-white">{feedback.enunciation}</span>
+      </div>
+      {feedback.corrections.length > 0 && (
+        <div className="mb-2">
+          <p className="mb-1 font-medium text-white">Corrections</p>
+          {feedback.corrections.map((c, i) => (
+            <p key={i} className="mb-1">
+              <s className="text-[#FF8A80]">{c.original || "…"}</s>{" "}
+              <span className="font-semibold text-positive">{c.corrected}</span>{" "}
+              <span className="text-white/50">— {c.reason}</span>
+            </p>
+          ))}
         </div>
-        <div className="mb-3 flex gap-3 text-[11px]">
-          <span className="text-white/50">Comprehension</span>
-          <span className="font-semibold text-white">{feedback.comprehension}</span>
-          <span className="text-white/50">Grammar</span>
-          <span className="font-semibold text-white">{feedback.grammar}</span>
-          <span className="text-white/50">Enunciation</span>
-          <span className="font-semibold text-white">{feedback.enunciation}</span>
-        </div>
-        {feedback.corrections.length > 0 && (
-          <div className="mb-2">
-            <p className="mb-1 font-medium text-white">Corrections</p>
-            {feedback.corrections.map((c, i) => (
-              <p key={i} className="mb-1">
-                <s className="text-[#FF8A80]">{c.original || "…"}</s>{" "}
-                <span className="font-semibold text-positive">{c.corrected}</span>{" "}
-                <span className="text-white/50">— {c.reason}</span>
-              </p>
-            ))}
-          </div>
-        )}
-        {feedback.good_points.length > 0 && (
-          <p className="mb-2 text-positive">✓ {feedback.good_points.join(" · ")}</p>
-        )}
-        {vocabEntries.length > 0 && (
-          <div className="mb-2">
-            <p className="mb-1 font-medium text-white">Word roots</p>
-            <div className="flex flex-wrap gap-1">
-              {visibleVocab.map((v, i) => (
+      )}
+      {feedback.good_points.length > 0 && (
+        <p className="mb-2 text-positive">✓ {feedback.good_points.join(" · ")}</p>
+      )}
+      {feedback.vocab.length > 0 && (
+        <div className="mb-2">
+          <p className="mb-1 font-medium text-white">Word roots</p>
+          <div className="flex flex-wrap gap-1">
+            {feedback.vocab
+              .filter((v) => v.breakdown)
+              .map((v, i) => (
                 <span key={i} className="rounded bg-white/5 px-1.5 py-0.5 ring-1 ring-white/10">
                   {v.word} → <b className="font-mono">{v.breakdown}</b>
                 </span>
@@ -770,6 +642,8 @@ function FeedbackPanel({ feedback }: { feedback: Feedback }) {
 }
 
 function ScoreBadge({ label, score }: { label: string; score: number }) {
+  const color =
+    score >= 75 ? "text-positive" : score >= 50 ? "text-warning" : "text-[#FF8A80]";
   return (
     <span className={`flex items-center gap-1 font-bold ${scoreTextClass(score)}`}>
       {label} {score}
