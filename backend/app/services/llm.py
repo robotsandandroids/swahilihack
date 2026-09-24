@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 from typing import Any
 
 from tenacity import (
@@ -111,6 +112,38 @@ def _retry_after_seconds(retry_state) -> float | None:
     return max(seconds, 0.0)
 
 
+def _parse_llm_json(content: str) -> dict:
+    """Parse JSON from LLM output, extracting from markdown fences or surrounding prose if needed."""
+    cleaned = content.strip()
+    try:
+        res = json.loads(cleaned)
+        if isinstance(res, dict):
+            return res
+    except json.JSONDecodeError:
+        pass
+
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
+    if fence_match:
+        try:
+            res = json.loads(fence_match.group(1).strip())
+            if isinstance(res, dict):
+                return res
+        except json.JSONDecodeError:
+            pass
+
+    first_brace = cleaned.find("{")
+    last_brace = cleaned.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        try:
+            res = json.loads(cleaned[first_brace : last_brace + 1])
+            if isinstance(res, dict):
+                return res
+        except json.JSONDecodeError:
+            pass
+
+    raise json.JSONDecodeError("Could not extract JSON from LLM response", content, 0)
+
+
 def render_user_content(
     transcript: str,
     diagnostic: StemDiagnostic | None,
@@ -211,26 +244,26 @@ class LLMService:
     def _require_configured(self) -> None:
         settings = self._settings
         primary = settings.llm_provider.strip().lower()
+        if primary == "gemini":
+            if not (settings.gemini_api_key or settings.mistral_api_key or settings.openai_api_key or settings.llm_base_url):
+                raise RuntimeError(
+                    "No LLM configured: set GEMINI_API_KEY (MISTRAL_API_KEY "
+                    "works as an automatic fallback)."
+                )
+            return
         if primary == "mistral":
-            if not (settings.mistral_api_key or settings.gemini_api_key):
+            if not (settings.mistral_api_key or settings.gemini_api_key or settings.openai_api_key or settings.llm_base_url):
                 raise RuntimeError(
                     "No LLM configured: set MISTRAL_API_KEY (GEMINI_API_KEY "
                     "works as an automatic fallback)."
                 )
             return
-        if primary == "gemini":
-            if not settings.gemini_api_key:
-                raise RuntimeError(
-                    "No LLM configured: set GEMINI_API_KEY (or switch "
-                    "LLM_PROVIDER back to mistral)."
-                )
-            return
-        if not settings.llm_uses_mistral and not (
-            settings.openai_api_key or settings.llm_base_url or settings.gemini_api_key
+        if not (
+            settings.openai_api_key or settings.llm_base_url or settings.gemini_api_key or settings.mistral_api_key
         ):
             raise RuntimeError(
-                "No LLM configured: set OPENAI_API_KEY (or LLM_BASE_URL + key), "
-                "or GEMINI_API_KEY as a fallback."
+                "No LLM configured: set GEMINI_API_KEY, MISTRAL_API_KEY, "
+                "or OPENAI_API_KEY in .env."
             )
 
     # --- public chat / complete ------------------------------------------
@@ -253,9 +286,9 @@ class LLMService:
     def _provider_chain(self) -> list[tuple[str, Any, Any]]:
         """Ordered (name, retried_call, quick_call) providers for this call.
 
-        Primary provider first; Gemini is appended as an automatic fallback
-        whenever its key is configured (so Mistral/OpenAI rate-limit or
-        outages degrade gracefully instead of failing the turn). The two
+        Primary provider first (default: Gemini); Mistral is appended as an
+        automatic fallback whenever its key is configured (so Gemini rate-limits
+        or outages degrade gracefully instead of failing the turn). The two
         callables let :meth:`chat` pick patience (full Retry-After backoff)
         when this is the only provider, or fast fail-over when a fallback
         exists.
@@ -263,15 +296,25 @@ class LLMService:
         settings = self._settings
         chain: list[tuple[str, Any, Any]] = []
         primary = settings.llm_provider.strip().lower()
-        if primary == "mistral" and settings.mistral_api_key:
+        if primary == "gemini" and settings.gemini_api_key:
+            chain.append(("gemini", self._gemini_call, self._chat_gemini_once))
+        elif primary == "mistral" and settings.mistral_api_key:
             chain.append(("mistral", self._mistral_call, self._chat_mistral_once))
         elif primary == "openai" and (settings.openai_api_key or settings.llm_base_url):
             chain.append(("openai", self._chat_openai, self._chat_openai))
-        elif primary == "gemini":
-            chain.append(("gemini", self._gemini_call, self._chat_gemini_once))
 
-        if settings.gemini_api_key and "gemini" not in [n for n, _, _ in chain]:
-            chain.append(("gemini", self._gemini_call, self._chat_gemini_once))
+        fallback_order = (
+            ["mistral", "openai"] if primary == "gemini" else ["gemini", "mistral", "openai"]
+        )
+        for prov in fallback_order:
+            if prov in [n for n, _, _ in chain]:
+                continue
+            if prov == "gemini" and settings.gemini_api_key:
+                chain.append(("gemini", self._gemini_call, self._chat_gemini_once))
+            elif prov == "mistral" and settings.mistral_api_key:
+                chain.append(("mistral", self._mistral_call, self._chat_mistral_once))
+            elif prov == "openai" and (settings.openai_api_key or settings.llm_base_url):
+                chain.append(("openai", self._chat_openai, self._chat_openai))
         return chain
 
     def chat(
@@ -383,8 +426,8 @@ class LLMService:
             ) from exc
 
         try:
-            data = json.loads(content) if isinstance(content, str) else content
-        except json.JSONDecodeError:
+            data = _parse_llm_json(content) if isinstance(content, str) else content
+        except Exception:
             logger.warning("LLM returned non-JSON; coercing: %s", content[:200])
             data = {"ai_text": content, "ai_translation": "", "feedback": {}}
 
