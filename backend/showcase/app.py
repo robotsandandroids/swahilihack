@@ -103,24 +103,29 @@ class FakeLLM:
 # --- sidebar ---------------------------------------------------------------
 
 st.sidebar.title("SemaAI backend")
-st.sidebar.caption("Mistral + LlamaIndex memory + deterministic stemmer")
+st.sidebar.caption("Gemini + LlamaIndex memory + deterministic stemmer")
 
 has_key = (
-    settings.mistral_api_key
+    settings.gemini_api_key
+    or settings.mistral_api_key
     or settings.openai_api_key
-    or settings.gemini_api_key
     or settings.llm_base_url
 )
 demo = st.sidebar.toggle("Demo mode (no API key)", value=not has_key)
+
+fallback_label = "none"
+if settings.llm_uses_gemini and settings.mistral_api_key:
+    fallback_label = f"mistral ({settings.mistral_model})"
+elif settings.gemini_api_key:
+    fallback_label = f"gemini ({settings.gemini_model})"
+elif settings.mistral_api_key:
+    fallback_label = f"mistral ({settings.mistral_model})"
 
 st.sidebar.subheader("Runtime")
 st.sidebar.json({
     "provider": settings.llm_provider,
     "model": settings.llm_active_model,
-    "fallback": (
-        f"gemini ({settings.gemini_model})"
-        if settings.gemini_api_key else "none"
-    ),
+    "fallback": fallback_label,
     "stt": settings.stt_engine,
     "tts": f"{settings.tts_engine} ({settings.tts_voice})",
     "max_tokens": settings.llm_max_tokens,
