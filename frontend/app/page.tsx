@@ -398,8 +398,7 @@
                       className={`rounded-full border px-3 py-1 text-xs transition ${
                         ttsEnabled
                           ? "border-brand bg-brand font-medium text-white shadow-xs"
-                          : "border-[var(--btn-secondary-border)] text-[var(--btn-secondary-text)] hover:bg-[var(--btn-
-  secondary-hover-bg)] hover:text-[var(--btn-secondary-hover-text)]"
+                          : "border-[var(--btn-secondary-border)] text-[var(--btn-secondary-text)] hover:bg-[var(--btn-secondary-hover-bg)] hover:text-[var(--btn-secondary-hover-text)]"
                       }`}
                     >
                       Voice {ttsEnabled ? "on" : "off"}
@@ -811,8 +810,7 @@
               className={`flex h-14 w-14 items-center justify-center rounded-full border transition ${
                 showSubtitles
                   ? "border-brand bg-brand/20 text-brand"
-                  : "border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-secondary)] hover:bg-[var(--card-
-  hover)] hover:text-[var(--text-primary)]"
+                  : "border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-secondary)] hover:bg-[var(--card-hover)] hover:text-[var(--text-primary)]"
               }`}
               title={showSubtitles ? "Hide subtitles & feedback" : "Show subtitles & feedback"}
               aria-label="Toggle subtitles"
