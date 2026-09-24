@@ -118,3 +118,19 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
+
+@keyframes pulseWave {
+  0% {
+    transform: scaleY(0.4);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scaleY(1.2);
+    opacity: 1;
+  }
+}
+
+.animate-waveform {
+  animation: pulseWave 0.85s ease-in-out infinite alternate;
+}
+
