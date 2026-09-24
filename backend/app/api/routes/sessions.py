@@ -23,6 +23,8 @@ from app.models.schemas import (
 )
 from app.models.scenarios import get_scenario
 from app.services.llm import LLMService
+from app.services.memory import MemoryRegistry
+from app.services.stemmer.diagnostic import StemDiagnostic, analyze_sentence
 from app.services.store import store
 from app.services.stt.base import SpeechToTextError
 from app.services.stt.factory import get_stt
@@ -30,6 +32,7 @@ from app.services.stt.factory import get_stt
 router = APIRouter(prefix="/api", tags=["sessions"])
 
 _llm = LLMService()
+_registry = MemoryRegistry(store)
 
 
 def _pick_difficulty(scenario: Scenario, requested: Difficulty | None) -> Difficulty:
@@ -74,16 +77,32 @@ def _scripts_turn(
     transcript: str,
     max_turns: int,
 ) -> TurnResponse:
-    history = session.history
+    settings: Settings = get_settings()
+    memory = _registry.memory_for(session.id, _llm)
+    session.history = memory.to_history()  # keep the snapshot in sync
+
+    # Deterministic stemmer pre-pass: only error diagnostics get injected, so
+    # correct sentences pay no extra prompt tokens. Repeated mistakes get a
+    # repeat_error flag so the model keeps the reminder to one line.
+    diagnostic: StemDiagnostic = StemDiagnostic()
+    is_repeat = False
+    if settings.stemmer_diagnostics:
+        diagnostic = analyze_sentence(transcript)
+        if diagnostic.has_error:
+            cache = _registry.error_cache_for(session.id)
+            is_repeat = cache.check_and_record(
+                diagnostic.error_type or "unknown", diagnostic.root
+            )
+
     try:
-        reply = _llm.play_scenario_turn(scenario, history, transcript)
+        reply = _llm.play_scenario_turn(
+            scenario, memory, transcript, diagnostic, is_repeat
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    session.history = history + [
-        {"role": "user", "content": transcript or "(silence)"},
-        {"role": "assistant", "content": reply.ai_text},
-    ]
+    # Persist the structured snapshot (rebuildable via SummarizingMemory).
+    session.history = memory.to_history()
     session.turn += 1
     if session.turn >= max_turns:
         session.status = SessionStatus.completed

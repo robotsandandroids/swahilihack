@@ -64,6 +64,7 @@ nothing to grade yet).
 | --- | --- | --- | --- |
 | GET | `/api/stem?word=ninakula` | `word` | `StemAnalysis` |
 | POST | `/api/stem/batch` | `["kulia", "alilia", ...]` (1-100) | `StemAnalysis[]` |
+| POST | `/api/stem/sentence` | `{"sentence": "atalia jana"}` | sentence diagnostic |
 
 `StemAnalysis`:
 
@@ -80,6 +81,22 @@ nothing to grade yet).
   "lemma": "lia",
   "is_swahili": true,
   "confidence": 0.9
+}
+```
+
+`POST /api/stem/sentence` is the deterministic pre-LLM diagnostic (Option B):
+it checks a verb's tense marker against the sentence's time cue and returns a
+compact structured result (empty fields when the sentence is clean):
+
+```json
+{
+  "sentence": "atalia jana",
+  "root": "lia",
+  "given_marker": "ta",
+  "expected_marker": "li",
+  "cue": "jana",
+  "error_type": "tense_marker",
+  "has_error": true
 }
 ```
 
