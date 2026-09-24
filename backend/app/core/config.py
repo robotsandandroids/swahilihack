@@ -66,13 +66,6 @@ class Settings(BaseSettings):
     # only inject the structured error diagnostic when one is found.
     stemmer_diagnostics: bool = True
 
-    # --- Text-to-Speech ---
-    # "edge" (edge-tts, no API key) or "none" to disable; TTS_VOICE picks a
-    # neural Swahili voice and TTS_RATE (e.g. "+0%", "-10%") controls speed.
-    tts_engine: str = "edge"
-    tts_voice: str = "sw-KE-ZuriNeural"
-    tts_rate: str = "+0%"
-
     # --- Session limits ---
     session_max_turns: int = 8
     session_max_scenarios: int = 120
