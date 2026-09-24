@@ -1,18 +1,21 @@
 """SemaAI backend showcase (Streamlit).
 
-Shows the whole backend pipeline in one page:
+Drives the SAME production pipeline as the FastAPI turn endpoint; the
+``showcase`` imports :func:`app.services.pipeline.run_turn` directly so every
+turn exercises byte-for-byte the real path (no API server needed):
 
-    text/audio -> (deterministic) stemmer diagnostic -> LlamaIndex memory
-    (ChatMemoryBuffer + summarization) -> error cache (repeat_error) ->
-    Mistral/OpenAI tutor -> scores + morphology
+    audio (ASR) / text -> (deterministic) stemmer diagnostic -> LlamaIndex
+    memory (ChatMemoryBuffer + summarization) -> error cache (repeat_error)
+    -> Mistral/OpenAI tutor (Swahili reply + structured feedback) ->
+    edge-tts speech + rendered text
 
 Run:
 
     cd backend
     uv run streamlit run showcase/app.py
 
-Uses the real backend services directly (no API server needed). Toggle
-``Demo mode`` in the sidebar to explore the UI without a Mistral/OpenAI key.
+Toggle ``Demo mode`` in the sidebar to explore the UI without a Mistral/OpenAI
+key (edge-tts still speaks the replies — it needs no key).
 """
 
 from __future__ import annotations
@@ -30,9 +33,11 @@ from app.models.schemas import Session, SessionStatus  # noqa: E402
 from app.models.scenarios import get_scenario, list_scenarios  # noqa: E402
 from app.services.llm import LLMService  # noqa: E402
 from app.services.memory import MemoryRegistry  # noqa: E402
-from app.services.stemmer.diagnostic import StemDiagnostic, analyze_sentence  # noqa: E402
+from app.services.pipeline import run_turn  # noqa: E402
 from app.services.store import store  # noqa: E402
+from app.services.stt.base import SpeechToTextError  # noqa: E402
 from app.services.stt.factory import get_stt  # noqa: E402
+from app.services.tts import synthesize  # noqa: E402
 
 st.set_page_config(page_title="SemaAI Backend Showcase", layout="wide")
 
@@ -98,16 +103,31 @@ class FakeLLM:
 # --- sidebar ---------------------------------------------------------------
 
 st.sidebar.title("SemaAI backend")
-st.sidebar.caption("Mistral + LlamaIndex memory + deterministic stemmer")
+st.sidebar.caption("Gemini + LlamaIndex memory + deterministic stemmer")
 
-has_key = settings.mistral_api_key or settings.openai_api_key or settings.llm_base_url
+has_key = (
+    settings.gemini_api_key
+    or settings.mistral_api_key
+    or settings.openai_api_key
+    or settings.llm_base_url
+)
 demo = st.sidebar.toggle("Demo mode (no API key)", value=not has_key)
+
+fallback_label = "none"
+if settings.llm_uses_gemini and settings.mistral_api_key:
+    fallback_label = f"mistral ({settings.mistral_model})"
+elif settings.gemini_api_key:
+    fallback_label = f"gemini ({settings.gemini_model})"
+elif settings.mistral_api_key:
+    fallback_label = f"mistral ({settings.mistral_model})"
 
 st.sidebar.subheader("Runtime")
 st.sidebar.json({
     "provider": settings.llm_provider,
     "model": settings.llm_active_model,
+    "fallback": fallback_label,
     "stt": settings.stt_engine,
+    "tts": f"{settings.tts_engine} ({settings.tts_voice})",
     "max_tokens": settings.llm_max_tokens,
     "backoff": f"{settings.llm_backoff_min_seconds}-{settings.llm_backoff_max_seconds}s "
                f"x{settings.llm_max_attempts}",
@@ -126,7 +146,7 @@ st.sidebar.json({
 })
 
 if st.sidebar.button("Reset session"):
-    for key in ("session", "last_turn"):
+    for key in ("session", "last_turn", "_output_audio"):
         st.session_state.pop(key, None)
     st.rerun()
 
@@ -158,6 +178,7 @@ if "session" not in st.session_state or st.session_state.get("scenario_id") != s
     registry.drop(snapshot.id)
     st.session_state.session = snapshot
     st.session_state.pop("last_turn", None)
+    st.session_state.pop("_output_audio", None)
 
 session: Session = st.session_state.session
 memory = registry.memory_for(session.id, FakeLLM() if demo else llm)
@@ -176,47 +197,64 @@ with col_l:
 
     with st.form("turn", clear_on_submit=True):
         text = st.text_input("Reply in Swahili (text)", key="reply_text")
-        audio = st.audio_input("Or record your reply", key="reply_audio")
+        audio = st.audio_input("Or record your reply", key="_audio_input")
         submitted = st.form_submit_button(
             f"Send reply (turn {session.turn + 1}/{settings.session_max_turns})", type="primary"
         )
 
 if submitted and (text.strip() or audio is not None):
     transcript = text.strip()
-    if audio is not None:
-        with st.spinner("Transcribing (local faster-whisper)…"):
-            try:
-                transcript = get_stt().transcribe(audio.getvalue(), language="sw").text
-            except Exception as exc:  # model download / engine not installed
-                st.error(f"STT failed: {exc}. Send text instead.")
-                transcript = ""
+    used_audio = audio is not None
+    if used_audio:
+        audio_bytes = audio.getvalue()
+        if len(audio_bytes) > settings.max_audio_bytes:
+            st.error(
+                f"Audio too large ({len(audio_bytes)} bytes; "
+                f"max {settings.max_audio_bytes}). Send text instead."
+            )
+            transcript = ""
+        else:
+            with st.spinner("Transcribing (local faster-whisper)…"):
+                try:
+                    transcript = get_stt().transcribe(
+                        audio_bytes, language="sw"
+                    ).text
+                except SpeechToTextError as exc:  # model download / engine error
+                    st.error(f"STT failed: {exc}. Send text instead.")
+                    transcript = ""
 
     if transcript:
         with col_l:
             with st.spinner("Diagnosing + calling the tutor LLM…"):
-                # deterministic pre-pass (Option B)
-                diag = (
-                    analyze_sentence(transcript)
-                    if settings.stemmer_diagnostics
-                    else StemDiagnostic()
-                )
-                is_repeat = False
-                if diag.has_error:
-                    is_repeat = cache.check_and_record(
-                        diag.error_type or "unknown", diag.root
+                try:
+                    # Same production pipeline as the FastAPI turn endpoint:
+                    # stemmer diagnostic -> memory -> Mistral/OpenAI tutor.
+                    outcome = run_turn(
+                        session,
+                        scenario,
+                        transcript,
+                        llm=FakeLLM() if demo else llm,
+                        registry=registry,
+                        max_turns=settings.session_max_turns,
                     )
-                agent = FakeLLM() if demo else llm
-                reply = agent.play_scenario_turn(
-                    scenario, memory, transcript, diag, is_repeat
-                )
+                except RuntimeError as exc:
+                    st.error(f"Tutor LLM failed: {exc}")
+                    outcome = None
+                except Exception as exc:  # never let a provider escape crash the UI
+                    st.error(f"Unexpected pipeline error: {type(exc).__name__}: {exc}")
+                    outcome = None
 
-            session.history = memory.to_history()
-            session.turn += 1
-            if session.turn >= settings.session_max_turns:
-                session.status = SessionStatus.completed
-            store.save(session)
-            st.session_state.last_turn = (reply, diag, is_repeat, transcript)
-            st.rerun()
+            if outcome is not None:
+                # Speak the tutor's Swahili reply (edge-tts; empty if disabled).
+                st.session_state.last_turn = (outcome, used_audio)
+                if settings.tts_enabled:
+                    with st.spinner("Synthesizing reply speech (edge-tts)…"):
+                        st.session_state._output_audio = synthesize(
+                            outcome.reply.ai_text
+                        )
+                else:
+                    st.session_state._output_audio = None
+                st.rerun()
 
 
 # --- right column: feedback + under the hood --------------------------------
@@ -224,8 +262,27 @@ if submitted and (text.strip() or audio is not None):
 with col_r:
     last = st.session_state.get("last_turn")
     if last:
-        reply, diag, is_repeat, transcript = last
+        outcome, used_audio = last
+        reply = outcome.reply
+        diag = outcome.diagnostic
+        is_repeat = outcome.is_repeat
+        transcript = outcome.transcript
         fb = reply.feedback
+
+        st.subheader("Tutor reply (Swahili & speech)")
+        st.markdown(reply.ai_text)
+        if reply.ai_translation:
+            st.caption(reply.ai_translation)
+        reply_audio = st.session_state.get("_output_audio")
+        if reply_audio:
+            st.audio(reply_audio, format="audio/mp3", autoplay=True)
+        elif settings.tts_enabled:
+            st.warning("Speech synthesis returned no audio (offline?). Text shown above.")
+        if used_audio:
+            st.info(f":microphone: **Heard (STT):** `{transcript}`")
+        elif transcript:
+            st.caption(f"Reply received as text: `{transcript}`")
+
         if fb:
             st.subheader("Feedback")
             m1, m2, m3, m4 = st.columns(4)

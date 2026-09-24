@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import random
+import re
+from typing import Any
 
 from tenacity import (
     retry,
     retry_if_exception,
     stop_after_attempt,
-    wait_exponential,
 )
 from llama_index.core.llms import ChatMessage, MessageRole
 
@@ -70,7 +72,6 @@ RULES:
 - WEKA max_tokens: fupi na sahihi. Usirudie yale uliyosema.
 """
 
-
 def _is_retryable(exc: BaseException) -> bool:
     """Retry on rate limits, 5xx and timeouts; never spam 4xx errors."""
     code = _status_code(exc)
@@ -88,6 +89,59 @@ def _status_code(exc: BaseException) -> int | None:
     if hasattr(response, "status_code"):
         return response.status_code
     return None
+
+
+def _retry_after_seconds(retry_state) -> float | None:
+    """Honour the provider's ``Retry-After`` header (secs) when present.
+
+    Mistral and OpenAI rate-limit responses frequently include one; blindly
+    re-polling before it elapses just burns attempts and keeps tripping the
+    limiter. ``None`` when the server gave no hint.
+    """
+    if retry_state.outcome is None or not retry_state.outcome.failed:
+        return None
+    exc = retry_state.outcome.exception()
+    headers = getattr(exc, "headers", None) or {}
+    value = headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(seconds, 0.0)
+
+
+def _parse_llm_json(content: str) -> dict:
+    """Parse JSON from LLM output, extracting from markdown fences or surrounding prose if needed."""
+    cleaned = content.strip()
+    try:
+        res = json.loads(cleaned)
+        if isinstance(res, dict):
+            return res
+    except json.JSONDecodeError:
+        pass
+
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
+    if fence_match:
+        try:
+            res = json.loads(fence_match.group(1).strip())
+            if isinstance(res, dict):
+                return res
+        except json.JSONDecodeError:
+            pass
+
+    first_brace = cleaned.find("{")
+    last_brace = cleaned.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        try:
+            res = json.loads(cleaned[first_brace : last_brace + 1])
+            if isinstance(res, dict):
+                return res
+        except json.JSONDecodeError:
+            pass
+
+    raise json.JSONDecodeError("Could not extract JSON from LLM response", content, 0)
 
 
 def render_user_content(
@@ -118,16 +172,18 @@ class LLMService:
         self._settings = get_settings()
         self._openai_client = None
         self._mistral_llm = None
-        self._mistral_call = retry(
-            wait=wait_exponential(
-                multiplier=1,
-                min=self._settings.llm_backoff_min_seconds,
-                max=self._settings.llm_backoff_max_seconds,
-            ),
+        self._gemini_llm = None
+        self._mistral_call = self._retried(self._chat_mistral_once)
+        self._gemini_call = self._retried(self._chat_gemini_once)
+
+    def _retried(self, fn):
+        """tenacity policy shared by every provider we call directly."""
+        return retry(
+            wait=self._wait,
             stop=stop_after_attempt(self._settings.llm_max_attempts),
             retry=retry_if_exception(_is_retryable),
             reraise=True,
-        )(self._chat_mistral_once)
+        )(fn)
 
     # --- provider clients -------------------------------------------------
     def _ensure_client(self):
@@ -166,34 +222,135 @@ class LLMService:
             )
         return self._mistral_llm
 
+    def _ensure_gemini(self):
+        if self._gemini_llm is None:
+            from llama_index.llms.gemini import Gemini
+
+            if not self._settings.gemini_api_key:
+                raise RuntimeError(
+                    "Gemini is not configured: set GEMINI_API_KEY in .env."
+                )
+            model = self._settings.gemini_model
+            if not model.startswith("models/"):
+                model = f"models/{model}"
+            self._gemini_llm = Gemini(
+                model=model,
+                api_key=self._settings.gemini_api_key,
+                temperature=0.7,
+                max_tokens=self._settings.llm_max_tokens,
+            )
+        return self._gemini_llm
+
     def _require_configured(self) -> None:
         settings = self._settings
-        if settings.llm_uses_mistral and not settings.mistral_api_key:
-            raise RuntimeError("No LLM configured: set MISTRAL_API_KEY.")
-        if not settings.llm_uses_mistral and not (
-            settings.openai_api_key or settings.llm_base_url
+        primary = settings.llm_provider.strip().lower()
+        if primary == "gemini":
+            if not (settings.gemini_api_key or settings.mistral_api_key or settings.openai_api_key or settings.llm_base_url):
+                raise RuntimeError(
+                    "No LLM configured: set GEMINI_API_KEY (MISTRAL_API_KEY "
+                    "works as an automatic fallback)."
+                )
+            return
+        if primary == "mistral":
+            if not (settings.mistral_api_key or settings.gemini_api_key or settings.openai_api_key or settings.llm_base_url):
+                raise RuntimeError(
+                    "No LLM configured: set MISTRAL_API_KEY (GEMINI_API_KEY "
+                    "works as an automatic fallback)."
+                )
+            return
+        if not (
+            settings.openai_api_key or settings.llm_base_url or settings.gemini_api_key or settings.mistral_api_key
         ):
             raise RuntimeError(
-                "No LLM configured: set OPENAI_API_KEY (or LLM_BASE_URL + key)."
+                "No LLM configured: set GEMINI_API_KEY, MISTRAL_API_KEY, "
+                "or OPENAI_API_KEY in .env."
             )
 
     # --- public chat / complete ------------------------------------------
+    def _wait(self, retry_state) -> float:
+        """Wait for the next retry: Retry-After if given, else jittered exp.
+
+        Jitter prevents bursts colliding; ``Retry-After`` is capped at
+        ``llm_max_wait_seconds`` so a pathological value can't stall a demo.
+        """
+        settings = self._settings
+        base = settings.llm_backoff_min_seconds * (
+            2 ** (retry_state.attempt_number - 1)
+        )
+        backoff = min(base * (1 + random.uniform(0, 0.2)), settings.llm_backoff_max_seconds)
+        server = _retry_after_seconds(retry_state)
+        if server is None:
+            return backoff
+        return min(server, settings.llm_max_wait_seconds)
+
+    def _provider_chain(self) -> list[tuple[str, Any, Any]]:
+        """Ordered (name, retried_call, quick_call) providers for this call.
+
+        Primary provider first (default: Gemini); Mistral is appended as an
+        automatic fallback whenever its key is configured (so Gemini rate-limits
+        or outages degrade gracefully instead of failing the turn). The two
+        callables let :meth:`chat` pick patience (full Retry-After backoff)
+        when this is the only provider, or fast fail-over when a fallback
+        exists.
+        """
+        settings = self._settings
+        chain: list[tuple[str, Any, Any]] = []
+        primary = settings.llm_provider.strip().lower()
+        if primary == "gemini" and settings.gemini_api_key:
+            chain.append(("gemini", self._gemini_call, self._chat_gemini_once))
+        elif primary == "mistral" and settings.mistral_api_key:
+            chain.append(("mistral", self._mistral_call, self._chat_mistral_once))
+        elif primary == "openai" and (settings.openai_api_key or settings.llm_base_url):
+            chain.append(("openai", self._chat_openai, self._chat_openai))
+
+        fallback_order = (
+            ["mistral", "openai"] if primary == "gemini" else ["gemini", "mistral", "openai"]
+        )
+        for prov in fallback_order:
+            if prov in [n for n, _, _ in chain]:
+                continue
+            if prov == "gemini" and settings.gemini_api_key:
+                chain.append(("gemini", self._gemini_call, self._chat_gemini_once))
+            elif prov == "mistral" and settings.mistral_api_key:
+                chain.append(("mistral", self._mistral_call, self._chat_mistral_once))
+            elif prov == "openai" and (settings.openai_api_key or settings.llm_base_url):
+                chain.append(("openai", self._chat_openai, self._chat_openai))
+        return chain
+
     def chat(
         self,
         messages: list[ChatMessage],
         max_tokens: int | None = None,
     ) -> str:
-        """One provider call, capped at max_tokens (hard ceiling)."""
+        """One call through the provider chain, capped at max_tokens.
+
+        With a fallback configured the primary gets one quick attempt then
+        fails over immediately (a 429 must not stall the turn); alone, the
+        provider retries with full Retry-After-aware backoff.
+        """
         settings = self._settings
         tokens = max_tokens or settings.llm_max_tokens
-        if settings.llm_uses_mistral:
-            return self._mistral_call(messages, tokens)
-        return self._chat_openai(messages, tokens)
+        chain = self._provider_chain()
+        if not chain:
+            raise RuntimeError(
+                "No LLM configured: set MISTRAL_API_KEY, OPENAI_API_KEY, "
+                "or GEMINI_API_KEY in .env."
+            )
+        patient = len(chain) == 1
+        last_error: Exception | None = None
+        for name, retried, quick in chain:
+            try:
+                return (retried if patient else quick)(messages, tokens)
+            except Exception as exc:  # try the next provider in the chain
+                logger.warning("LLM provider '%s' failed: %s", name, exc)
+                last_error = exc
+        assert last_error is not None
+        raise last_error
 
     def complete(self, prompt: str, max_tokens: int = 120) -> str:
-        """Raw completion used by memory summarization (same backoff policy)."""
+        """Raw completion used by memory summarization (same fallback chain)."""
         messages = [ChatMessage(role=MessageRole.USER, content=prompt)]
-        return self._mistral_call(messages, max_tokens) if self._settings.llm_uses_mistral else self._chat_openai(messages, max_tokens)
+        return self.chat(messages, max_tokens)
 
     def _chat_openai(self, messages: list[ChatMessage], max_tokens: int) -> str:
         client = self._ensure_client()
@@ -210,13 +367,22 @@ class LLMService:
         return response.choices[0].message.content or "{}"
 
     def _chat_mistral_once(self, messages: list[ChatMessage], max_tokens: int) -> str:
-        """Mistral call (backoff applied via tenacity in __init__).
+        """Mistral call (retry/backoff applied via tenacity in __init__).
 
-        No retry-storm on 429s: each attempt waits longer, and we only retry
-        rate limits / 5xx / timeouts.
+        No retry-storm on 429s: each attempt waits longer (honouring the
+        provider's Retry-After), and we only retry rate limits / 5xx / timeouts.
         """
         llm = self._ensure_mistral()
         response = llm.chat(messages, max_tokens=max_tokens)
+        return response.message.content or "{}"
+
+    def _chat_gemini_once(self, messages: list[ChatMessage], max_tokens: int) -> str:
+        """Gemini call — used directly (LLM_PROVIDER=gemini) or as the
+        automatic fallback when Mistral/OpenAI fail. Output is forced into
+        the same JSON-ish contract via prompt; the parser coerce-guards it.
+        """
+        llm = self._ensure_gemini()
+        response = llm.chat(messages)
         return response.message.content or "{}"
 
     # --- high level turn -------------------------------------------------
@@ -246,11 +412,22 @@ class LLMService:
             *memory.get(),
         ]
 
-        content = self.chat(messages)
+        try:
+            content = self.chat(messages)
+        except Exception as exc:
+            # Surface provider errors (rate limit, quota, timeouts) as a
+            # friendly RuntimeError so the API layer (->503) and the showcase
+            # (st.error) can present them without crashing the UI.
+            detail = _status_code(exc)
+            raise RuntimeError(
+                f"Tutor LLM unavailable (provider {'HTTP ' + str(detail) if detail else 'error'}): "
+                f"{type(exc).__name__}: {exc}. "
+                "If you hit a rate limit, wait a bit and retry."
+            ) from exc
 
         try:
-            data = json.loads(content) if isinstance(content, str) else content
-        except json.JSONDecodeError:
+            data = _parse_llm_json(content) if isinstance(content, str) else content
+        except Exception:
             logger.warning("LLM returned non-JSON; coercing: %s", content[:200])
             data = {"ai_text": content, "ai_translation": "", "feedback": {}}
 

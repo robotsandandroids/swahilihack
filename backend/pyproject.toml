@@ -3,10 +3,12 @@ name = "swahili-backend"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "edge-tts>=7.2.8",
     "fastapi>=0.141.1",
     "faster-whisper>=1.2.1",
     "httpx>=0.28.1",
     "llama-index-core>=0.13.0",
+    "llama-index-llms-gemini>=0.6.2",
     "llama-index-llms-mistralai>=0.7.0",
     "openai>=3.16.2",
     "pydantic-settings>=2.15.0",
