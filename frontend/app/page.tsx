@@ -38,6 +38,7 @@
       startSession,
       stemWord,
       submitTurn,
+      textToSpeech,
     } from "@/lib/api";
     import { useRecorder } from "@/lib/useRecorder";
 
@@ -95,17 +96,17 @@
       }[tier];
     }
 
-    function speak(
+    let activeAudio: HTMLAudioElement | null = null;
+
+    function fallbackSpeak(
       text: string,
-      enabled: boolean,
       onStart?: () => void,
       onEnd?: () => void,
     ) {
-      if (!enabled || typeof window === "undefined" || !("speechSynthesis" in window)) {
+      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
         onEnd?.();
         return;
       }
-      window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = VOICE_LANG;
       if (onStart) utterance.onstart = onStart;
@@ -114,6 +115,55 @@
         utterance.onerror = onEnd;
       }
       window.speechSynthesis.speak(utterance);
+    }
+
+    async function speak(
+      text: string,
+      enabled: boolean,
+      onStart?: () => void,
+      onEnd?: () => void,
+    ) {
+      if (!enabled || typeof window === "undefined") {
+        onEnd?.();
+        return;
+      }
+
+      if (activeAudio) {
+        activeAudio.pause();
+        activeAudio = null;
+      }
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+
+      // Try server-side edge-tts first for high quality neural Swahili
+      try {
+        const blob = await textToSpeech(text);
+        if (blob && blob.size > 0) {
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          activeAudio = audio;
+          if (onStart) {
+            audio.onplay = onStart;
+          }
+          audio.onended = () => {
+            URL.revokeObjectURL(url);
+            activeAudio = null;
+            onEnd?.();
+          };
+          audio.onerror = () => {
+            URL.revokeObjectURL(url);
+            activeAudio = null;
+            fallbackSpeak(text, onStart, onEnd);
+          };
+          await audio.play();
+          return;
+        }
+      } catch {
+        // Fall back to browser Web Speech API
+      }
+
+      fallbackSpeak(text, onStart, onEnd);
     }
 
     function getInitialTheme(): "light" | "dark" {
@@ -152,8 +202,7 @@
     }) {
       return (
         <main className="flex min-h-dvh items-center justify-center p-6 bg-background">
-          <div className="w-full max-w-md rounded-2xl border border-[var(--panel-border)] bg-panel p-6 text-center shadow-
-  sm">
+          <div className="w-full max-w-md rounded-2xl border border-[var(--panel-border)] bg-panel p-6 text-center shadow-sm">
             <h2 className="mb-2 text-lg font-semibold text-[var(--text-primary)]">
               Couldn’t load scenarios
             </h2>
@@ -363,8 +412,7 @@
 
       return (
         <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col p-4 sm:p-6 lg:p-10">
-          <div className="min-h-[580px] flex-1 rounded-2xl border border-[var(--panel-border)] bg-panel px-4 py-6 shadow-sm
-  transition-colors sm:px-10 sm:py-8 dashboard-enter">
+          <div className="min-h-[580px] flex-1 rounded-2xl border border-[var(--panel-border)] bg-panel px-4 py-6 shadow-sm transition-colors sm:px-10 sm:py-8 dashboard-enter">
             {!session ? (
               <>
                 <header className="mb-7 flex items-center justify-between">
@@ -377,9 +425,7 @@
                       onClick={toggleTheme}
                       aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
                       title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-                      className="flex items-center gap-1.5 rounded-full border border-[var(--btn-secondary-border)] px-3
-  py-1 text-xs text-[var(--btn-secondary-text)] transition hover:bg-[var(--btn-secondary-hover-bg)] hover:text-[var(--btn-
-  secondary-hover-text)]"
+                      className="flex items-center gap-1.5 rounded-full border border-[var(--btn-secondary-border)] px-3 py-1 text-xs text-[var(--btn-secondary-text)] transition hover:bg-[var(--btn-secondary-hover-bg)] hover:text-[var(--btn-secondary-hover-text)]"
                     >
                       {theme === "dark" ? (
                         <>
@@ -408,8 +454,7 @@
                 </header>
 
                 {error && (
-                  <div className="mb-4 rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3
-  text-sm text-danger">
+                  <div className="mb-4 rounded-lg border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 text-sm text-danger">
                     {error}
                   </div>
                 )}
@@ -563,15 +608,13 @@
             <div className="mb-4 flex items-center justify-between border-b border-[var(--card-border)] pb-3">
               <button
                 onClick={() => setViewMode("voice")}
-                className="flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs
-  font-medium text-brand transition hover:bg-brand/20"
+                className="flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs font-medium text-brand transition hover:bg-brand/20"
               >
                 ← Return to voice call
               </button>
               <button
                 onClick={onExit}
-                className="rounded-full border border-[var(--card-border)] px-3 py-1 text-xs text-[var(--text-muted)]
-  hover:text-[var(--text-primary)]"
+                className="rounded-full border border-[var(--card-border)] px-3 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               >
                 End session
               </button>
@@ -600,16 +643,14 @@
           <div className="flex items-center justify-between">
             <button
               onClick={onExit}
-              className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--text-muted)] transition
-  hover:bg-[var(--card-hover)] hover:text-[var(--text-primary)]"
+              className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--text-muted)] transition hover:bg-[var(--card-hover)] hover:text-[var(--text-primary)]"
               aria-label="Exit call"
               title="Exit call"
             >
               <X className="h-5 w-5" />
             </button>
 
-            <div className="flex items-center gap-2 rounded-full border border-[var(--card-border)] bg-[var(--card-bg)] px-
-  3 py-1 text-xs font-medium text-[var(--text-secondary)]">
+            <div className="flex items-center gap-2 rounded-full border border-[var(--card-border)] bg-[var(--card-bg)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
               <span>{formatCallTime(callSeconds)}</span>
             </div>
@@ -617,8 +658,7 @@
             <div className="relative">
               <button
                 onClick={() => setShowMenu((v) => !v)}
-                className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--text-muted)] transition
-  hover:bg-[var(--card-hover)] hover:text-[var(--text-primary)]"
+                className="flex h-10 w-10 items-center justify-center rounded-full text-[var(--text-muted)] transition hover:bg-[var(--card-hover)] hover:text-[var(--text-primary)]"
                 aria-label="More options"
                 title="More options"
               >
@@ -626,8 +666,7 @@
               </button>
 
               {showMenu && (
-                <div className="absolute right-0 top-12 z-20 w-48 rounded-xl border border-[var(--card-border)] bg-panel p-
-  2 shadow-lg animate-in fade-in zoom-in-95 duration-150">
+                <div className="absolute right-0 top-12 z-20 w-48 rounded-xl border border-[var(--card-border)] bg-panel p-2 shadow-lg animate-in fade-in zoom-in-95 duration-150">
                   <div className="px-3 py-1.5 text-[11px] text-[var(--text-muted)]">
                     {turnsLeft} turn{turnsLeft === 1 ? "" : "s"} remaining
                   </div>
@@ -637,8 +676,7 @@
                       setViewMode("chat");
                       setShowMenu(false);
                     }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)]
-  transition hover:bg-[var(--card-hover)]"
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] transition hover:bg-[var(--card-hover)]"
                   >
                     <MessageSquare className="h-3.5 w-3.5" />
                     <span>Text chat mode</span>
@@ -648,8 +686,7 @@
                       onToggleTts();
                       setShowMenu(false);
                     }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)]
-  transition hover:bg-[var(--card-hover)]"
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] transition hover:bg-[var(--card-hover)]"
                   >
                     {ttsEnabled ? (
                       <>
@@ -668,8 +705,7 @@
                       onToggleTheme();
                       setShowMenu(false);
                     }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)]
-  transition hover:bg-[var(--card-hover)]"
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] transition hover:bg-[var(--card-hover)]"
                   >
                     {theme === "dark" ? (
                       <>
@@ -689,8 +725,7 @@
                       setShowMenu(false);
                       onExit();
                     }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-danger transition
-  hover:bg-danger/10"
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-xs text-danger transition hover:bg-danger/10"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                     <span>End scenario</span>
@@ -702,8 +737,7 @@
 
           {/* Center Voice Module Content */}
           <div className="my-auto flex flex-col items-center justify-center py-6 text-center">
-            <div className="mb-8 max-w-sm sm:max-w-md truncate rounded-full border border-brand/35 bg-brand/[0.08] px-5 py-
-  2 text-xs sm:text-[13px] font-medium text-brand-soft shadow-xs">
+            <div className="mb-8 max-w-sm sm:max-w-md truncate rounded-full border border-brand/35 bg-brand/[0.08] px-5 py-2 text-xs sm:text-[13px] font-medium text-brand-soft shadow-xs">
               <span>{pillText}</span>
             </div>
 
@@ -715,8 +749,7 @@
                     : "scale-100 bg-brand/12 blur-xl"
                 }`}
               />
-              <div className="relative flex h-36 w-36 items-center justify-center rounded-full border border-brand/25 bg-
-  [#161413] shadow-inner transition-transform duration-300">
+              <div className="relative flex h-36 w-36 items-center justify-center rounded-full border border-brand/25 bg-[#161413] shadow-inner transition-transform duration-300">
                 <RobotIcon className="h-16 w-16 text-[#F0997B]" />
               </div>
             </div>
@@ -738,8 +771,7 @@
             </p>
 
             {showSubtitles && latestAiTurn && (
-              <div className="mt-5 w-full max-w-md rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] p-4
-  text-left shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <div className="mt-5 w-full max-w-md rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] p-4 text-left shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium text-[var(--text-primary)]">
@@ -787,8 +819,7 @@
                           .map((v, i) => (
                             <span
                               key={i}
-                              className="rounded bg-[var(--tag-bg)] px-1.5 py-0.5 text-[10px] text-[var(--text-primary)]
-  ring-1 ring-[var(--tag-border)]"
+                              className="rounded bg-[var(--tag-bg)] px-1.5 py-0.5 text-[10px] text-[var(--text-primary)] ring-1 ring-[var(--tag-border)]"
                             >
                               {v.word} → <b className="font-mono">{v.breakdown}</b>
                             </span>
@@ -839,8 +870,7 @@
 
             <button
               onClick={onTogglePause}
-              className="flex h-14 w-14 items-center justify-center rounded-full border border-[var(--card-border)] bg-
-  [var(--card-bg)] text-[var(--text-secondary)] transition hover:bg-[var(--card-hover)] hover:text-[var(--text-primary)]"
+              className="flex h-14 w-14 items-center justify-center rounded-full border border-[var(--card-border)] bg-[var(--card-bg)] text-[var(--text-secondary)] transition hover:bg-[var(--card-hover)] hover:text-[var(--text-primary)]"
               title={isPaused ? "Resume call" : "Pause call"}
               aria-label={isPaused ? "Resume call" : "Pause call"}
             >
@@ -907,8 +937,7 @@
           </div>
 
           {/* Suggested scenario */}
-          <div className="mb-7 flex items-center justify-between gap-4 rounded-[14px] border border-[var(--brand-card-
-  border)] bg-[var(--brand-card-bg)] px-5 py-[1.1rem] transition">
+          <div className="mb-7 flex items-center justify-between gap-4 rounded-[14px] border border-[var(--brand-card-border)] bg-[var(--brand-card-bg)] px-5 py-[1.1rem] transition">
             <div className="min-w-0">
               <div className="mb-1 text-[11px] font-medium text-brand-soft">Suggested for you</div>
               <div className="truncate text-[15px] font-medium text-[var(--text-primary)]">
@@ -921,8 +950,7 @@
             <button
               disabled={busy}
               onClick={() => onPick(suggested)}
-              className="flex shrink-0 items-center gap-1.5 rounded-full bg-brand px-[18px] py-2.5 text-[13px] font-medium
-  text-white shadow-xs transition hover:brightness-110 disabled:opacity-50"
+              className="flex shrink-0 items-center gap-1.5 rounded-full bg-brand px-[18px] py-2.5 text-[13px] font-medium text-white shadow-xs transition hover:brightness-110 disabled:opacity-50"
             >
               <Mic className="h-[15px] w-[15px]" aria-hidden />
               Start
@@ -944,8 +972,7 @@
                   key={s.id}
                   disabled={busy}
                   onClick={() => onPick(s)}
-                  className="flex flex-col items-start gap-2 rounded-xl border border-[var(--card-border)] bg-[var(--card-
-  bg)] p-3.5 text-left transition hover:border-brand/40 hover:bg-[var(--card-hover)] disabled:opacity-50"
+                  className="flex flex-col items-start gap-2 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] p-3.5 text-left transition hover:border-brand/40 hover:bg-[var(--card-hover)] disabled:opacity-50"
                 >
                   <Icon className="h-5 w-5" style={{ color: iconColor }} aria-hidden />
                   <span className="text-[13px] font-medium text-[var(--text-primary)]">{meta.sw}</span>
@@ -964,9 +991,7 @@
             <button
               disabled={busy}
               onClick={surprise}
-              className="flex min-h-[110px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed
-  border-[var(--surprise-border)] bg-[var(--surprise-bg)] text-[var(--surprise-text)] transition hover:border-brand
-  hover:text-brand disabled:opacity-50"
+              className="flex min-h-[110px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-[var(--surprise-border)] bg-[var(--surprise-bg)] text-[var(--surprise-text)] transition hover:border-brand hover:text-brand disabled:opacity-50"
             >
               <Dices className="h-5 w-5" aria-hidden />
               <span className="text-xs font-medium">Surprise me</span>
@@ -1023,14 +1048,12 @@
           </div>
 
           {session.scenario.hint_en && turns.length <= 1 && (
-            <p className="mb-4 rounded-lg border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3 py-2 text-sm
-  text-warning">
+            <p className="mb-4 rounded-lg border border-[var(--warning-border)] bg-[var(--warning-bg)] px-3 py-2 text-sm text-warning">
               Hint: {session.scenario.hint_en}
             </p>
           )}
 
-          <div className="mb-4 flex min-h-[300px] flex-col gap-3 rounded-xl border border-[var(--card-border)] bg-[var(--
-  card-bg)] p-4">
+          <div className="mb-4 flex min-h-[300px] flex-col gap-3 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] p-4">
             {turns.map((t, i) => (
               <Message key={i} turn={t} onReplay={onReplay} />
             ))}
@@ -1056,8 +1079,7 @@
             </button>
 
             {recording && (
-              <div className="flex items-center gap-2 rounded-full border border-brand/30 bg-brand/10 px-2 py-1 text-xs
-  font-medium text-brand-soft">
+              <div className="flex items-center gap-2 rounded-full border border-brand/30 bg-brand/10 px-2 py-1 text-xs font-medium text-brand-soft">
                 <div className="flex h-4 items-end gap-1">
                   {[0, 1, 2, 3].map((bar) => (
                     <span
@@ -1078,15 +1100,13 @@
                 if (e.key === "Enter") onSend();
               }}
               placeholder="…or type your reply in Kiswahili"
-              className="h-12 flex-1 rounded-full border border-[var(--input-border)] bg-[var(--input-bg)] px-4 text-sm
-  text-[var(--text-primary)] outline-none transition placeholder:text-[var(--input-placeholder)] focus:border-brand"
+              className="h-12 flex-1 rounded-full border border-[var(--input-border)] bg-[var(--input-bg)] px-4 text-sm text-[var(--text-primary)] outline-none transition placeholder:text-[var(--input-placeholder)] focus:border-brand"
             />
 
             <button
               onClick={onSend}
               disabled={busy || !textInput.trim()}
-              className="h-12 shrink-0 rounded-full bg-brand px-5 text-sm font-medium text-white shadow-xs transition
-  hover:brightness-110 disabled:opacity-40"
+              className="h-12 shrink-0 rounded-full bg-brand px-5 text-sm font-medium text-white shadow-xs transition hover:brightness-110 disabled:opacity-40"
             >
               Send
             </button>
@@ -1138,8 +1158,7 @@
             {isAi && (
               <button
                 onClick={() => onReplay(turn.text)}
-                className="mt-2 text-xs text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--text-
-  primary)]"
+                className="mt-2 text-xs text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--text-primary)]"
               >
                 replay
               </button>
@@ -1159,8 +1178,7 @@
           : vocabEntries.slice(0, 4);
 
       return (
-        <div className="mt-3 rounded-xl border border-[var(--feedback-border)] bg-[var(--feedback-bg)] p-3 text-xs text-
-  [var(--text-secondary)] feedback-panel-enter">
+        <div className="mt-3 rounded-xl border border-[var(--feedback-border)] bg-[var(--feedback-bg)] p-3 text-xs text-[var(--text-secondary)] feedback-panel-enter">
           <div className="mb-2 flex items-center justify-between">
             <span className="font-semibold text-[var(--text-primary)]">{feedback.headline}</span>
             <ScoreBadge label="Overall" score={feedback.score} />
@@ -1199,8 +1217,7 @@
                 {visibleVocab.map((v, i) => (
                   <span
                     key={i}
-                    className="rounded bg-[var(--tag-bg)] px-1.5 py-0.5 text-[10px] text-[var(--text-primary)] ring-1 ring-
-  [var(--tag-border)]"
+                    className="rounded bg-[var(--tag-bg)] px-1.5 py-0.5 text-[10px] text-[var(--text-primary)] ring-1 ring-[var(--tag-border)]"
                   >
                     {v.word} → <b className="font-mono">{v.breakdown}</b>
                   </span>
@@ -1211,8 +1228,7 @@
                 <button
                   type="button"
                   onClick={() => setShowAllVocab((v) => !v)}
-                  className="mt-2 text-[11px] text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--text-
-  primary)]"
+                  className="mt-2 text-[11px] text-[var(--text-muted)] underline underline-offset-2 hover:text-[var(--text-primary)]"
                 >
                   {showAllVocab ? "Show less" : `Show ${vocabEntries.length - 4} more`}
                 </button>
