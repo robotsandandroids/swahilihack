@@ -27,6 +27,7 @@ from app.services.stemmer.swahili import analyze_swahili_word
 logger = logging.getLogger(__name__)
 
 SYSTEM_TEMPLATE = """\
+Wewe ni Mzizi AI msaidizi katika masomo ya Kiswahili.
 Unacheza nafasi ya {character} katika mazoezi ya Kiswahili. Mazoezi ni kuhusu: {scenario_title}.
 
 DJALOZI HUFANYIKA HAPA: {context}
