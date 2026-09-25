@@ -46,8 +46,7 @@
     } from "@/lib/api";
     import { useRecorder } from "@/lib/useRecorder";
     import LandingPage from "./landing";
-
-    const VOICE_LANG = "sw-KE";
+    import { speakAzure, cancelAzureTTS } from "@/lib/tts";
 
     // SemaAI identity: greens/limes/gold only
     const LOCATION_META: Record<
@@ -106,20 +105,14 @@
       enabled: boolean,
       onStart?: () => void,
       onEnd?: () => void,
+      mode: "swahili" | "codeswitched" = "swahili",
     ) {
-      if (!enabled || typeof window === "undefined" || !("speechSynthesis" in window)) {
+      if (!enabled) {
         onEnd?.();
         return;
       }
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = VOICE_LANG;
-      if (onStart) utterance.onstart = onStart;
-      if (onEnd) {
-        utterance.onend = onEnd;
-        utterance.onerror = onEnd;
-      }
-      window.speechSynthesis.speak(utterance);
+      // Use Azure Neural TTS (edge-tts backend) — fires in parallel, plays when ready
+      speakAzure(text, { mode, onStart, onEnd });
     }
 
     function getInitialTheme(): "light" | "dark" {
@@ -323,10 +316,8 @@
             await respondTo(blob);
           }
         } else {
-          if (typeof window !== "undefined" && "speechSynthesis" in window) {
-            window.speechSynthesis.cancel();
+          cancelAzureTTS();
             setIsAiSpeaking(false);
-          }
           setRecordingSeconds(0);
           await start();
         }
@@ -360,21 +351,15 @@
       const togglePause = useCallback(() => {
         setIsPaused((prev) => {
           const next = !prev;
-          if (typeof window !== "undefined" && "speechSynthesis" in window) {
-            if (next) {
-              window.speechSynthesis.pause();
-            } else {
-              window.speechSynthesis.resume();
-            }
-          }
+          // HTMLAudioElement doesn't support pause/resume mid-TTS easily;
+          // we cancel on pause and the user can replay. Acceptable UX tradeoff.
+          if (next) cancelAzureTTS();
           return next;
         });
       }, []);
 
       const exitSession = useCallback((currentTurns?: ChatTurn[], currentSession?: StartedSession | null) => {
-        if (typeof window !== "undefined" && "speechSynthesis" in window) {
-          window.speechSynthesis.cancel();
-        }
+        cancelAzureTTS();
         // Compute summary from turns before clearing
         const turnsToUse = currentTurns !== undefined ? currentTurns : [];
         const sessionToUse = currentSession !== undefined ? currentSession : null;
