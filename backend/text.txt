@@ -1,0 +1,6 @@
+- We need to create a documentaion of how the models makes the suggestions and responds to the user request to keep track and easy to debug
+- Fix the English reading basicly fine tuning the system message
+- Memory using the index LLAMMA graph to keep track of the conversations 
+- Response latency is quite higher - solution - optimizations 
+- Show the pipeline diagrams and flowchart of how we handle the requests to when we get the output
+- fine tune the voice model to be almost accurate and ofkos request for additional information where It has not understand

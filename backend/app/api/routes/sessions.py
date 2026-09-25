@@ -9,6 +9,7 @@ from fastapi import (
     HTTPException,
     UploadFile,
 )
+from fastapi.responses import Response
 from starlette.requests import Request
 
 from app.core.config import Settings, get_settings
@@ -24,10 +25,11 @@ from app.models.schemas import (
 from app.models.scenarios import get_scenario
 from app.services.llm import LLMService
 from app.services.memory import MemoryRegistry
-from app.services.stemmer.diagnostic import StemDiagnostic, analyze_sentence
+from app.services.pipeline import run_turn
 from app.services.store import store
 from app.services.stt.base import SpeechToTextError
 from app.services.stt.factory import get_stt
+from app.services.tts import synthesize
 
 router = APIRouter(prefix="/api", tags=["sessions"])
 
@@ -77,45 +79,18 @@ def _scripts_turn(
     transcript: str,
     max_turns: int,
 ) -> TurnResponse:
-    settings: Settings = get_settings()
-    memory = _registry.memory_for(session.id, _llm)
-    session.history = memory.to_history()  # keep the snapshot in sync
-
-    # Deterministic stemmer pre-pass: only error diagnostics get injected, so
-    # correct sentences pay no extra prompt tokens. Repeated mistakes get a
-    # repeat_error flag so the model keeps the reminder to one line.
-    diagnostic: StemDiagnostic = StemDiagnostic()
-    is_repeat = False
-    if settings.stemmer_diagnostics:
-        diagnostic = analyze_sentence(transcript)
-        if diagnostic.has_error:
-            cache = _registry.error_cache_for(session.id)
-            is_repeat = cache.check_and_record(
-                diagnostic.error_type or "unknown", diagnostic.root
-            )
-
     try:
-        reply = _llm.play_scenario_turn(
-            scenario, memory, transcript, diagnostic, is_repeat
+        outcome = run_turn(
+            session,
+            scenario,
+            transcript,
+            llm=_llm,
+            registry=_registry,
+            max_turns=max_turns,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    # Persist the structured snapshot (rebuildable via SummarizingMemory).
-    session.history = memory.to_history()
-    session.turn += 1
-    if session.turn >= max_turns:
-        session.status = SessionStatus.completed
-    store.save(session)
-
-    return TurnResponse(
-        ai_text=reply.ai_text,
-        ai_translation=reply.ai_translation,
-        feedback=reply.feedback,
-        session_status=session.status,
-        turn=session.turn,
-        turns_left=max(max_turns - session.turn, 0),
-    )
+    return outcome.reply
 
 
 @router.post("/sessions/{session_id}/turns", response_model=TurnResponse)
@@ -187,3 +162,32 @@ def get_session(session_id: str) -> Session:
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
+
+
+@router.post("/tts")
+@router.get("/tts")
+async def text_to_speech(
+    request: Request,
+    text: str | None = Form(default=None),
+) -> Response:
+    """Synthesize speech (MP3) for a Swahili string (edge-tts, no key)."""
+    input_text = text
+    if not input_text and request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                input_text = body.get("text")
+        except Exception:
+            pass
+    if not input_text:
+        input_text = request.query_params.get("text")
+    if not input_text or not input_text.strip():
+        raise HTTPException(status_code=400, detail="Text is required for TTS")
+    audio = synthesize(input_text.strip())
+    if not audio:
+        raise HTTPException(status_code=503, detail="TTS unavailable")
+    return Response(
+        content=audio,
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "no-store"},
+    )
