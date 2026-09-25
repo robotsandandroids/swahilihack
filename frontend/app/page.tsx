@@ -45,6 +45,7 @@
       submitTurn,
     } from "@/lib/api";
     import { useRecorder } from "@/lib/useRecorder";
+    import LandingPage from "./landing";
 
     const VOICE_LANG = "sw-KE";
 
@@ -177,6 +178,7 @@
     }
 
     export default function Home() {
+      const [view, setView] = useState<"landing" | "app">("landing");
       const [theme, setTheme] = useState<"light" | "dark">(getInitialTheme);
       const [scenarios, setScenarios] = useState<Scenario[]>([]);
       const [session, setSession] = useState<StartedSession | null>(null);
@@ -202,6 +204,13 @@
         }
       }, [theme]);
 
+      // Restore app view for returning users — runs client-side only, no SSR mismatch
+      useEffect(() => {
+        try {
+          if (localStorage.getItem("sema_seen") === "1") setView("app");
+        } catch {}
+      }, []);
+
       const toggleTheme = useCallback(() => {
         setTheme((curr) => {
           const next = curr === "dark" ? "light" : "dark";
@@ -219,6 +228,11 @@
         }, 1000);
         return () => window.clearInterval(interval);
       }, [recording]);
+
+      const launchApp = useCallback(() => {
+        try { localStorage.setItem("sema_seen", "1"); } catch {}
+        setView("app");
+      }, []);
 
       const loadScenarios = useCallback(() => {
         setScenarioLoad("loading");
@@ -393,6 +407,10 @@
         setError(null);
       }, []);
 
+      if (view === "landing") {
+        return <LandingPage onLaunch={launchApp} />;
+      }
+
       if (scenarioLoad === "loading") {
         return <SplashLoading />;
       }
@@ -408,10 +426,14 @@
             {!session ? (
               <>
                 <header className="mb-7 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-base font-semibold text-[var(--text-primary)]">
+                  <button
+                    onClick={() => setView("landing")}
+                    className="flex items-center gap-2 text-base font-semibold text-[var(--text-primary)] transition hover:opacity-75"
+                    aria-label="Go to home"
+                  >
                     <div className="h-[26px] w-[26px] rounded-[7px] bg-brand shadow-xs" />
                     Sema
-                  </div>
+                  </button>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={toggleTheme}
