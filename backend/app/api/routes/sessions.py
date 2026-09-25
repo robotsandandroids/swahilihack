@@ -10,6 +10,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import Response
+from pydantic import BaseModel
 from starlette.requests import Request
 
 from app.core.config import Settings, get_settings
@@ -164,14 +165,32 @@ def get_session(session_id: str) -> Session:
     return session
 
 
+class TTSRequest(BaseModel):
+    text: str
+    mode: str = "swahili"  # "swahili" | "codeswitched"
+
+
 @router.post("/tts")
-async def text_to_speech(text: str = Form(...)) -> Response:
-    """Synthesize speech (MP3) for a Swahili string (edge-tts, no key)."""
-    audio = synthesize(text)
+async def text_to_speech(body: TTSRequest) -> Response:
+    """
+    Synthesize speech (MP3) via edge-tts neural voices.
+
+    mode="swahili"      → sw-KE-ZuriNeural, optimised for pure Swahili ai_text.
+    mode="codeswitched" → segments by language; Swahili uses ZuriNeural,
+                          English segments use en-GB-SoniaNeural.  Use for
+                          correction / feedback text.
+    """
+    from app.services.tts import synthesize_codeswitched
+
+    if body.mode == "codeswitched":
+        audio = synthesize_codeswitched(body.text)
+    else:
+        audio = synthesize(body.text)
+
     if not audio:
         raise HTTPException(status_code=503, detail="TTS unavailable")
     return Response(
         content=audio,
         media_type="audio/mpeg",
-        headers={"Cache-Control": "no-store"},
+        headers={"Cache-Control": "public, max-age=86400"},  # cache 24h — same text = same audio
     )

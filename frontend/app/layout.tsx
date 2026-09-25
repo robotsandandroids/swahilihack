@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,18 +19,8 @@ export const metadata: Metadata = {
     "Scenario-driven voice practice with an in-character AI: speak, get scored, learn word breakdowns.",
 };
 
-const themeScript = `
-(function() {
-  try {
-    var stored = localStorage.getItem('sema_theme');
-    if (stored === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  } catch (e) {}
-})();
-`;
+// Runs before React hydrates — prevents theme flash (FOUC)
+const themeScript = `(function(){try{var s=localStorage.getItem('sema_theme');if(s==='dark')document.documentElement.classList.add('dark');else document.documentElement.classList.remove('dark');}catch(e){}})();`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
@@ -38,10 +29,18 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-      </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {/*
+          beforeInteractive ensures this runs before React hydrates,
+          preventing a flash of unstyled (wrong-theme) content.
+        */}
+        <Script
+          id="theme-init"
+          strategy="beforeInteractive"
+          dangerouslySetInnerHTML={{ __html: themeScript }}
+        />
+        {children}
+      </body>
     </html>
   );
 }
