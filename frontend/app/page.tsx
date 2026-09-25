@@ -2,9 +2,12 @@
 
     import { useCallback, useEffect, useRef, useState } from "react";
     import {
+      BookOpen,
       Bus,
       Briefcase,
       Car,
+      CheckCircle,
+      ChevronRight,
       Coffee,
       Dices,
       Hand,
@@ -23,6 +26,8 @@
       Stethoscope,
       Store,
       Sun,
+      Trophy,
+      TrendingUp,
       Volume2,
       VolumeX,
       X,
@@ -184,6 +189,8 @@
       const [isPaused, setIsPaused] = useState(false);
       const [recordingSeconds, setRecordingSeconds] = useState(0);
       const [scenarioLoad, setScenarioLoad] = useState<"loading" | "loaded" | "error">("loading");
+      const [sessionSummary, setSessionSummary] = useState<SessionSummaryData | null>(null);
+      const [lastAttempt, setLastAttempt] = useState<{ audio?: Blob; text?: string } | null>(null);
       const { recording, error: recError, start, stop } = useRecorder();
       const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -266,6 +273,7 @@
           if (!session) return null;
           setBusy(true);
           setError(null);
+          setLastAttempt(null);
           try {
             const res = await submitTurn(session.session_id, { audio, transcript: fallbackText });
             const aiTurn: ChatTurn = {
@@ -284,6 +292,7 @@
             return res;
           } catch (e) {
             setError((e as Error).message);
+            setLastAttempt({ audio, text: fallbackText });
             return null;
           } finally {
             setBusy(false);
@@ -328,6 +337,12 @@
         [],
       );
 
+      const retryLast = useCallback(async () => {
+        if (!lastAttempt) return;
+        const { audio, text } = lastAttempt;
+        await respondTo(audio, text);
+      }, [lastAttempt, respondTo]);
+
       const togglePause = useCallback(() => {
         setIsPaused((prev) => {
           const next = !prev;
@@ -342,14 +357,40 @@
         });
       }, []);
 
-      const exitSession = useCallback(() => {
+      const exitSession = useCallback((currentTurns?: ChatTurn[], currentSession?: StartedSession | null) => {
         if (typeof window !== "undefined" && "speechSynthesis" in window) {
           window.speechSynthesis.cancel();
+        }
+        // Compute summary from turns before clearing
+        const turnsToUse = currentTurns !== undefined ? currentTurns : [];
+        const sessionToUse = currentSession !== undefined ? currentSession : null;
+        const feedbacks = turnsToUse.filter((t) => t.role === "ai" && t.feedback).map((t) => t.feedback!);
+        if (feedbacks.length > 0 && sessionToUse) {
+          const avgScore = Math.round(feedbacks.reduce((s, f) => s + f.score, 0) / feedbacks.length);
+          const avgGrammar = Math.round(feedbacks.reduce((s, f) => s + f.grammar, 0) / feedbacks.length);
+          const avgComprehension = Math.round(feedbacks.reduce((s, f) => s + f.comprehension, 0) / feedbacks.length);
+          const avgEnunciation = Math.round(feedbacks.reduce((s, f) => s + f.enunciation, 0) / feedbacks.length);
+          const allCorrections = feedbacks.flatMap((f) => f.corrections);
+          const allGoodPoints = [...new Set(feedbacks.flatMap((f) => f.good_points))];
+          const suggestions = feedbacks.map((f) => f.suggestion).filter(Boolean);
+          setSessionSummary({
+            scenario: sessionToUse.scenario,
+            overallScore: avgScore,
+            grammar: avgGrammar,
+            comprehension: avgComprehension,
+            enunciation: avgEnunciation,
+            turnsCompleted: turnsToUse.filter((t) => t.role === "user").length,
+            maxTurns: sessionToUse.max_turns,
+            corrections: allCorrections,
+            goodPoints: allGoodPoints,
+            suggestions,
+          });
         }
         setSession(null);
         setTurns([]);
         setIsAiSpeaking(false);
         setIsPaused(false);
+        setError(null);
       }, []);
 
       if (scenarioLoad === "loading") {
@@ -361,6 +402,7 @@
       }
 
       return (
+        <>
         <main className="mx-auto flex min-h-dvh w-full max-w-5xl flex-col p-4 sm:p-6 lg:p-10">
           <div className="min-h-[580px] flex-1 rounded-2xl border border-[var(--panel-border)] bg-panel px-4 py-6 shadow-sm transition-colors sm:px-10 sm:py-8 dashboard-enter">
             {!session ? (
@@ -430,18 +472,28 @@
                 theme={theme}
                 textInput={textInput}
                 setTextInput={setTextInput}
+                turnError={error}
+                hasRetry={!!lastAttempt}
                 onTogglePause={togglePause}
                 onToggleTts={() => setTtsEnabled((v) => !v)}
                 onToggleTheme={toggleTheme}
                 onRecord={recordAndSend}
                 onSendText={sendText}
-                onExit={exitSession}
+                onRetry={retryLast}
+                onExit={() => exitSession(turns, session)}
                 onReplay={replay}
               />
             )}
           </div>
           <div ref={bottomRef} />
         </main>
+        {sessionSummary && (
+          <SessionSummaryModal
+            data={sessionSummary}
+            onClose={() => setSessionSummary(null)}
+          />
+        )}
+        </>
       );
     }
 
@@ -508,8 +560,11 @@
       onTogglePause,
       onToggleTts,
       onToggleTheme,
+      turnError,
+      hasRetry,
       onRecord,
       onSendText,
+      onRetry,
       onExit,
       onReplay,
     }: {
@@ -528,8 +583,11 @@
       onTogglePause: () => void;
       onToggleTts: () => void;
       onToggleTheme: () => void;
+      turnError: string | null;
+      hasRetry: boolean;
       onRecord: () => void;
       onSendText: () => void;
+      onRetry: () => void;
       onExit: () => void;
       onReplay: (t: string) => void;
     }) {
@@ -579,8 +637,11 @@
               busy={busy}
               textInput={textInput}
               setTextInput={setTextInput}
+              turnError={turnError}
+              hasRetry={hasRetry}
               onRecord={onRecord}
               onSend={onSendText}
+              onRetry={onRetry}
               onReplay={onReplay}
             />
           </div>
@@ -782,6 +843,22 @@
             )}
 
             {recError && <p className="mt-3 text-xs text-danger">{recError}</p>}
+            {turnError && (
+              <div className="mt-4 flex w-full max-w-md items-start gap-3 rounded-xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-danger leading-snug">{turnError}</p>
+                </div>
+                {hasRetry && (
+                  <button
+                    onClick={onRetry}
+                    disabled={busy}
+                    className="shrink-0 rounded-full bg-danger px-3 py-1 text-xs font-medium text-white transition hover:brightness-110 disabled:opacity-50"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Bottom Controls */}
@@ -960,8 +1037,11 @@
       busy,
       textInput,
       setTextInput,
+      turnError,
+      hasRetry,
       onRecord,
       onSend,
+      onRetry,
       onReplay,
     }: {
       session: StartedSession;
@@ -972,8 +1052,11 @@
       busy: boolean;
       textInput: string;
       setTextInput: (v: string) => void;
+      turnError: string | null;
+      hasRetry: boolean;
       onRecord: () => void;
       onSend: () => void;
+      onRetry: () => void;
       onReplay: (text: string) => void;
     }) {
       const turnsLeft = Math.max(
@@ -1009,7 +1092,24 @@
             ))}
           </div>
 
-          {recError && <p className="mb-2 text-sm text-danger">{recError}</p>}
+          {(recError || turnError) && (
+            <div className="mb-2 flex items-start gap-3 rounded-xl border border-[var(--danger-border)] bg-[var(--danger-bg)] px-4 py-2.5 animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-danger leading-snug">
+                  {turnError ?? recError}
+                </p>
+              </div>
+              {hasRetry && turnError && (
+                <button
+                  onClick={onRetry}
+                  disabled={busy}
+                  className="shrink-0 rounded-full bg-danger px-3 py-1 text-xs font-medium text-white transition hover:brightness-110 disabled:opacity-50"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <button
@@ -1233,5 +1333,180 @@
     function feedVocab(word: string, feedback: Feedback) {
       const existing = feedback.vocab.find((v) => v.word === word);
       return { word, breakdown: existing?.breakdown ?? "", note: existing?.note ?? "" };
+    }
+
+    interface SessionSummaryData {
+      scenario: Scenario;
+      overallScore: number;
+      grammar: number;
+      comprehension: number;
+      enunciation: number;
+      turnsCompleted: number;
+      maxTurns: number;
+      corrections: import("@/lib/api").Correction[];
+      goodPoints: string[];
+      suggestions: string[];
+    }
+
+    function SessionSummaryModal({
+      data,
+      onClose,
+    }: {
+      data: SessionSummaryData;
+      onClose: () => void;
+    }) {
+      const meta = locationMeta(data.scenario.location);
+      const tier = scoreTier(data.overallScore);
+      const tierConfig = {
+        good: { label: "Great job!", color: "text-positive", icon: Trophy, ringColor: "ring-positive/30 bg-positive/10" },
+        mid: { label: "Keep it up!", color: "text-warning", icon: TrendingUp, ringColor: "ring-warning/30 bg-warning/10" },
+        "needs-work": { label: "Room to grow!", color: "text-danger", icon: BookOpen, ringColor: "ring-danger/30 bg-danger/10" },
+      }[tier];
+      const TierIcon = tierConfig.icon;
+
+      const subscores = [
+        { label: "Grammar", value: data.grammar },
+        { label: "Comprehension", value: data.comprehension },
+        { label: "Enunciation", value: data.enunciation },
+      ].sort((a, b) => a.value - b.value);
+
+      const focusAreas = subscores.filter((s) => s.value < 75).slice(0, 2);
+
+      return (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl border border-[var(--panel-border)] bg-panel shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+            style={{ maxHeight: "90dvh", overflowY: "auto" }}
+          >
+            <button
+              onClick={onClose}
+              className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-muted)] transition hover:bg-[var(--card-hover)] hover:text-[var(--text-primary)]"
+              aria-label="Close summary"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="p-6 pb-2">
+              <div className="mb-5 flex flex-col items-center text-center">
+                <div className={`mb-3 flex h-16 w-16 items-center justify-center rounded-full ring-2 ${tierConfig.ringColor}`}>
+                  <TierIcon className={`h-8 w-8 ${tierConfig.color}`} />
+                </div>
+                <p className={`text-lg font-semibold ${tierConfig.color}`}>{tierConfig.label}</p>
+                <p className="mt-0.5 text-sm text-[var(--text-muted)]">
+                  {meta.sw} · {data.scenario.title}
+                </p>
+              </div>
+
+              <div className="mb-5 flex flex-col items-center">
+                <div className={`text-5xl font-bold tabular-nums ${scoreTextClass(data.overallScore)}`}>
+                  {data.overallScore}
+                </div>
+                <div className="mt-0.5 text-xs text-[var(--text-muted)]">overall score / 100</div>
+              </div>
+
+              <div className="mb-5 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] p-4">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Skill breakdown</p>
+                <div className="flex flex-col gap-2.5">
+                  {[
+                    { label: "Comprehension", value: data.comprehension },
+                    { label: "Grammar", value: data.grammar },
+                    { label: "Enunciation", value: data.enunciation },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="flex items-center gap-3">
+                      <span className="w-28 shrink-0 text-xs text-[var(--text-secondary)]">{label}</span>
+                      <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-[var(--card-border)]">
+                        <div
+                          className={`h-full rounded-full transition-all duration-700 ${
+                            value >= 75 ? "bg-positive" : value >= 50 ? "bg-warning" : "bg-danger"
+                          }`}
+                          style={{ width: `${value}%` }}
+                        />
+                      </div>
+                      <span className={`w-8 shrink-0 text-right text-xs font-semibold ${scoreTextClass(value)}`}>
+                        {value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 text-right text-[11px] text-[var(--text-faint)]">
+                  {data.turnsCompleted} / {data.maxTurns} turns completed
+                </div>
+              </div>
+
+              {data.goodPoints.length > 0 && (
+                <div className="mb-4 rounded-xl border border-[var(--card-border)] bg-[var(--positive-bg)] p-3">
+                  <p className="mb-2 text-xs font-semibold text-positive">What went well</p>
+                  <ul className="flex flex-col gap-1">
+                    {data.goodPoints.slice(0, 3).map((pt, i) => (
+                      <li key={i} className="flex items-start gap-2 text-xs text-[var(--text-secondary)]">
+                        <CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-positive" />
+                        {pt}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {focusAreas.length > 0 && (
+                <div className="mb-4 rounded-xl border border-[var(--warning-border)] bg-[var(--warning-bg)] p-3">
+                  <p className="mb-2 text-xs font-semibold text-warning">Focus on next time</p>
+                  <ul className="flex flex-col gap-1.5">
+                    {focusAreas.map((area) => (
+                      <li key={area.label} className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-warning" />
+                        <span>
+                          <span className="font-medium">{area.label}</span>{" "}
+                          <span className="text-[var(--text-muted)]">— scored {area.value}/100, keep practising</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {data.corrections.length > 0 && (
+                <div className="mb-4 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] p-3">
+                  <p className="mb-2 text-xs font-semibold text-[var(--text-primary)]">Common corrections</p>
+                  <ul className="flex flex-col gap-1.5">
+                    {data.corrections.slice(0, 3).map((c, i) => (
+                      <li key={i} className="text-xs">
+                        <s className="text-danger">{c.original || "…"}</s>{" "}
+                        <span className="font-semibold text-positive">{c.corrected}</span>{" "}
+                        <span className="text-[var(--text-muted)]">— {c.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {data.suggestions.length > 0 && (
+                <div className="mb-4 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] p-3">
+                  <p className="mb-1 text-xs font-semibold text-[var(--text-primary)]">Coach tip</p>
+                  <p className="text-xs italic text-[var(--text-muted)]">→ {data.suggestions[data.suggestions.length - 1]}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="sticky bottom-0 flex gap-3 rounded-b-2xl border-t border-[var(--card-border)] bg-panel px-6 py-4">
+              <button
+                onClick={onClose}
+                className="flex-1 rounded-full border border-[var(--btn-secondary-border)] py-2.5 text-sm text-[var(--btn-secondary-text)] transition hover:bg-[var(--btn-secondary-hover-bg)]"
+              >
+                Back to scenarios
+              </button>
+              <button
+                onClick={onClose}
+                className="flex-1 rounded-full bg-brand py-2.5 text-sm font-medium text-white shadow-xs transition hover:brightness-110"
+              >
+                Practice again
+              </button>
+            </div>
+          </div>
+        </div>
+      );
     }
 

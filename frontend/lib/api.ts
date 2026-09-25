@@ -72,7 +72,19 @@ async function handle<T>(res: Response): Promise<T> {
     } catch {
       /* keep default */
     }
-    throw new Error(detail);
+    // Produce clean, user-facing messages for known status codes
+    if (res.status === 429) {
+      detail = "Rate limit reached — please wait a moment before trying again.";
+    } else if (res.status === 503 || res.status === 502) {
+      detail = "The AI service is temporarily unavailable. Please try again shortly.";
+    } else if (res.status === 401 || res.status === 403) {
+      detail = "Authentication error — please refresh the page.";
+    } else if (res.status >= 500) {
+      detail = `Server error (${res.status}) — please try again.`;
+    }
+    const err = new Error(detail) as Error & { status: number };
+    err.status = res.status;
+    throw err;
   }
   return res.json() as Promise<T>;
 }

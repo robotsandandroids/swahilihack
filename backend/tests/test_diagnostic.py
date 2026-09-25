@@ -6,6 +6,14 @@ from app.services.llm import render_user_content
 from llama_index.core.llms import ChatMessage, MessageRole
 
 
+## analia =  a-li-li-a
+## kukula = ku-kula
+## aliwaye = a-li-wa-ye
+
+## morpheme. - smallest unit of meaning in a language.
+# noun - mama
+# # adverb - kule
+
 def test_mismatched_tense_with_cue_is_caught():
     diag = analyze_sentence("atalia jana")
     assert diag.has_error
