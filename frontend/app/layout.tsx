@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SemaAI — practice speaking Swahili",
+  title: "Mzizi AI — practice speaking Swahili",
   description:
     "Scenario-driven voice practice with an in-character AI: speak, get scored, learn word breakdowns.",
 };

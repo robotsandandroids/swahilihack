@@ -1,4 +1,4 @@
-"""SemaAI backend showcase (Streamlit).
+"""Mzizi AI backend showcase (Streamlit).
 
 Drives the SAME production pipeline as the FastAPI turn endpoint; the
 ``showcase`` imports :func:`app.services.pipeline.run_turn` directly so every
@@ -39,7 +39,7 @@ from app.services.stt.base import SpeechToTextError  # noqa: E402
 from app.services.stt.factory import get_stt  # noqa: E402
 from app.services.tts import synthesize  # noqa: E402
 
-st.set_page_config(page_title="SemaAI Backend Showcase", layout="wide")
+st.set_page_config(page_title="Mzizi AI Backend Showcase", layout="wide")
 
 settings = get_settings()
 llm = LLMService()
@@ -102,7 +102,7 @@ class FakeLLM:
 
 # --- sidebar ---------------------------------------------------------------
 
-st.sidebar.title("SemaAI backend")
+st.sidebar.title("Mzizi AI backend")
 st.sidebar.caption("Gemini + LlamaIndex memory + deterministic stemmer")
 
 has_key = (

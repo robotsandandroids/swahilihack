@@ -1,6 +1,6 @@
 # Architecture
 
-SemaAI is a monorepo with two deployables plus docs:
+Mzizi AI is a monorepo with two deployables plus docs:
 
 ```
 swahilihack/

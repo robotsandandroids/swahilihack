@@ -1,4 +1,4 @@
-# SemaAI
+# Mzizi AI
 
 Practice spoken Swahili with an in-character AI. Pick a scenario (market,
 taxi, clinic…), the AI speaks the opening line, you reply by voice, and it

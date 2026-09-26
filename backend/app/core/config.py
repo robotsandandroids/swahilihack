@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     )
 
     # --- App ---
-    app_name: str = "SemaAI"
+    app_name: str = "Mzizi AI"
     debug: bool = True
     environment: str = "development"
 

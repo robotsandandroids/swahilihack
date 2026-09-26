@@ -1,4 +1,4 @@
-# SemaAI — Session integration summary
+# Mzizi AI — Session integration summary
 
 Status of the backend work driven by [`docs/part_2.md`](part_2.md) (the
 Mistral + LlamaIndex + cost-controls spec). Frontend (Next.js) was explicitly

@@ -1,8 +1,8 @@
-= SemaAI Backend Workflow
+= Mzizi AI Backend Workflow
 
 == Overview
 
-SemaAI is a Swahili language learning platform that provides conversational practice with AI tutors. The backend implements a deterministic pipeline that processes user utterances through several stages: speech-to-text, morphological analysis, memory-augmented generation, and text-to-speech.
+Mzizi AI is a Swahili language learning platform that provides conversational practice with AI tutors. The backend implements a deterministic pipeline that processes user utterances through several stages: speech-to-text, morphological analysis, memory-augmented generation, and text-to-speech.
 
 == Workflow Diagram
 

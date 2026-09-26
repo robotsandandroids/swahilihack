@@ -48,7 +48,7 @@
     import LandingPage from "./landing";
     import { speakAzure, cancelAzureTTS } from "@/lib/tts";
 
-    // SemaAI identity: greens/limes/gold only
+    // Mzizi AI identity: greens/limes/gold only
     const LOCATION_META: Record<
       string,
       { sw: string; icon: LucideIcon; color: string; colorLight: string }

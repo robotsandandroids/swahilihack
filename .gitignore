@@ -1,4 +1,4 @@
-# Root .gitignore for the SemaAI monorepo.
+# Root .gitignore for the Mzizi AI monorepo.
 # The frontend folder carries its own .gitignore from create-next-app.
 
 # --- Env / secrets ---

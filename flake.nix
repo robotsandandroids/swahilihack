@@ -1,5 +1,5 @@
 {
-  description = "SemaAI - practice spoken Swahili with an in-character AI (FastAPI + Next.js)";
+  description = "Mzizi AI - practice spoken Swahili with an in-character AI (FastAPI + Next.js)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -38,7 +38,7 @@
         frontendPkgs = with pkgs; [ nodejs_24 pnpm ];
 
         backendShellHook = ''
-          echo "SemaAI backend shell"
+          echo "Mzizi AI backend shell"
           echo "  uv run    -- lockfile-exact deps (recommended, matches uv.lock)"
           echo "  uvicorn   -- nixpkgs-built deps (openai 2.x)"
           echo "  pytest    -- run the test suite"
@@ -55,7 +55,7 @@
           frontend = pkgs.mkShell {
             packages = frontendPkgs;
             shellHook = ''
-              echo "SemaAI frontend shell (node $(node --version), pnpm $(pnpm --version))"
+              echo "Mzizi AI frontend shell (node $(node --version), pnpm $(pnpm --version))"
               echo "Start: pnpm install && pnpm dev"
             '';
           };
@@ -67,7 +67,7 @@
             ];
             packages = [ pkgs.git ];
             shellHook = ''
-              echo "SemaAI monorepo shell"
+              echo "Mzizi AI monorepo shell"
               echo "  nix develop .#backend   -- FastAPI toolchain"
               echo "  nix develop .#frontend  -- Next.js toolchain"
             '';
