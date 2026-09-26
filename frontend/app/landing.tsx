@@ -28,7 +28,7 @@ const FEATURES = [
   {
     icon: Mic,
     title: "Voice & text practice",
-    body: "Speak or type — Sema understands both. Practice real-world scenarios like markets, taxis, clinics, and more.",
+    body: "Speak or type — Mzizi understands both. Practice real-world scenarios like markets, taxis, clinics, and more.",
   },
   {
     icon: Star,
@@ -93,7 +93,7 @@ export default function LandingPage({ onLaunch }: { onLaunch: () => void }) {
       <nav className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4 sm:px-6 lg:px-10">
         <div className="flex items-center gap-2 text-base font-semibold text-[var(--text-primary)]">
           <div className="h-[26px] w-[26px] rounded-[7px] bg-brand shadow-xs" />
-          Sema
+          Mzizi
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -197,7 +197,7 @@ export default function LandingPage({ onLaunch }: { onLaunch: () => void }) {
             <div className="h-2.5 w-2.5 rounded-full bg-[var(--danger)]" />
             <div className="h-2.5 w-2.5 rounded-full bg-[var(--warning)]" />
             <div className="h-2.5 w-2.5 rounded-full bg-[var(--positive)]" />
-            <span className="ml-3 text-xs text-[var(--text-muted)]">Sema — Sokoni · Market bargaining</span>
+            <span className="ml-3 text-xs text-[var(--text-muted)]">Mzizi — Sokoni · Market bargaining</span>
           </div>
 
           {/* Fake chat */}
@@ -308,7 +308,7 @@ export default function LandingPage({ onLaunch }: { onLaunch: () => void }) {
         <div className="mx-auto flex max-w-5xl flex-col items-center gap-2 px-4 text-center sm:px-6 lg:px-10">
           <div className="flex items-center gap-1.5 text-sm font-medium text-[var(--text-primary)]">
             <div className="h-5 w-5 rounded-[5px] bg-brand" />
-            Sema
+            Mzizi
           </div>
           <p className="text-xs text-[var(--text-faint)]">
             AI-powered Kiswahili speaking practice
