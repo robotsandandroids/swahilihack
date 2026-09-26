@@ -37,7 +37,24 @@ class Settings(BaseSettings):
 
     # Gemini (via llama-index-llms-gemini)
     gemini_model: str = "gemini-3.6-flash"
+    # Single key (legacy / simple). If GEMINI_API_KEYS is set it takes
+    # priority; GEMINI_API_KEY is added to the pool as a fallback so old
+    # .env files keep working without changes.
     gemini_api_key: str | None = None
+    # Comma-separated pool of Gemini API keys for round-robin rotation.
+    # Example: GEMINI_API_KEYS=key1,key2,key3
+    gemini_api_keys: str | None = None
+
+    @property
+    def gemini_key_pool(self) -> list[str]:
+        """Deduplicated, ordered list of Gemini keys available for rotation."""
+        keys: list[str] = []
+        if self.gemini_api_keys:
+            keys = [k.strip() for k in self.gemini_api_keys.split(",") if k.strip()]
+        # Always append the single key if it isn't already in the pool
+        if self.gemini_api_key and self.gemini_api_key not in keys:
+            keys.append(self.gemini_api_key)
+        return keys
 
     # Mistral (via llama-index-llms-mistralai). Acts as an automatic fallback
     # whenever Gemini fails, or as the primary when LLM_PROVIDER=mistral.

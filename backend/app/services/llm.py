@@ -4,6 +4,8 @@ import json
 import logging
 import random
 import re
+import threading
+import time
 from typing import Any
 
 from tenacity import (
@@ -167,12 +169,100 @@ def render_user_content(
     return content
 
 
+
+# ---------------------------------------------------------------------------
+# Gemini key pool — thread-safe round-robin with per-key 429 cooldown
+# ---------------------------------------------------------------------------
+
+class GeminiKeyPool:
+    """Rotates through a list of Gemini API keys.
+
+    When a key receives a 429 (rate-limited / quota exceeded) it is put into
+    a cooldown period (``cooldown_seconds``). During that window the pool skips
+    it and tries the next key.  If *all* keys are cooling down, the call is
+    allowed to proceed with the least-recently-cooled key (rather than raising
+    immediately) so that the tenacity layer's normal back-off still fires.
+    """
+
+    _DEFAULT_COOLDOWN = 60.0  # seconds a key stays parked after a 429
+
+    def __init__(self, keys: list[str], cooldown_seconds: float = _DEFAULT_COOLDOWN) -> None:
+        if not keys:
+            raise ValueError("GeminiKeyPool requires at least one API key.")
+        self._keys = list(keys)
+        self._cooldown = cooldown_seconds
+        self._lock = threading.Lock()
+        # maps key → timestamp when it was rate-limited (0 = healthy)
+        self._limited_at: dict[str, float] = {k: 0.0 for k in self._keys}
+        self._idx = 0  # next key to try
+
+    # ------------------------------------------------------------------
+    @property
+    def size(self) -> int:
+        return len(self._keys)
+
+    def current_key(self) -> str:
+        """Return the active key (thread-safe peek, no rotation)."""
+        with self._lock:
+            return self._keys[self._idx % len(self._keys)]
+
+    def rotate(self) -> str:
+        """Advance to the next *healthy* key and return it.
+
+        A key is healthy if it has not been rate-limited, or if its cooldown
+        has expired.  If every key is cooling, returns the one whose cooldown
+        expires soonest (least recently limited).
+        """
+        with self._lock:
+            now = time.monotonic()
+            n = len(self._keys)
+            # Try each key in order starting from the one *after* current
+            for offset in range(1, n + 1):
+                candidate_idx = (self._idx + offset) % n
+                key = self._keys[candidate_idx]
+                if now - self._limited_at[key] >= self._cooldown:
+                    self._idx = candidate_idx
+                    logger.info(
+                        "Gemini key rotated to slot %d/%d.", candidate_idx + 1, n
+                    )
+                    return key
+            # All keys cooling — pick the one whose cooldown expires soonest
+            best_idx = min(
+                range(n), key=lambda i: self._limited_at[self._keys[i]]
+            )
+            self._idx = best_idx
+            logger.warning(
+                "All %d Gemini key(s) are rate-limited; using least-recently-"
+                "limited key (slot %d). Next cooldown expires in %.0fs.",
+                n,
+                best_idx + 1,
+                self._cooldown - (now - self._limited_at[self._keys[best_idx]]),
+            )
+            return self._keys[self._idx]
+
+    def mark_limited(self, key: str) -> None:
+        """Record that ``key`` just received a 429 / quota error."""
+        with self._lock:
+            if key in self._limited_at:
+                self._limited_at[key] = time.monotonic()
+                n = len(self._keys)
+                logger.warning(
+                    "Gemini key slot %d/%d rate-limited; "
+                    "cooling for %.0fs before next use.",
+                    self._keys.index(key) + 1,
+                    n,
+                    self._cooldown,
+                )
+
+
 class LLMService:
     def __init__(self) -> None:
         self._settings = get_settings()
         self._openai_client = None
         self._mistral_llm = None
-        self._gemini_llm = None
+        # Gemini: one LLM instance per key, keyed by api_key string
+        self._gemini_llms: dict[str, Any] = {}
+        self._gemini_pool: GeminiKeyPool | None = None
         self._mistral_call = self._retried(self._chat_mistral_once)
         self._gemini_call = self._retried(self._chat_gemini_once)
 
@@ -222,44 +312,58 @@ class LLMService:
             )
         return self._mistral_llm
 
-    def _ensure_gemini(self):
-        if self._gemini_llm is None:
-            from llama_index.llms.gemini import Gemini
-
-            if not self._settings.gemini_api_key:
+    def _ensure_gemini_pool(self) -> GeminiKeyPool:
+        """Initialise (once) and return the Gemini key pool."""
+        if self._gemini_pool is None:
+            keys = self._settings.gemini_key_pool
+            if not keys:
                 raise RuntimeError(
-                    "Gemini is not configured: set GEMINI_API_KEY in .env."
+                    "Gemini is not configured: set GEMINI_API_KEY or "
+                    "GEMINI_API_KEYS (comma-separated) in .env."
                 )
+            cooldown = self._settings.llm_max_wait_seconds
+            self._gemini_pool = GeminiKeyPool(keys, cooldown_seconds=cooldown)
+            logger.info(
+                "Gemini key pool initialised with %d key(s).", len(keys)
+            )
+        return self._gemini_pool
+
+    def _ensure_gemini(self, api_key: str | None = None):
+        """Return a Gemini LLM client for the given key (cached per key)."""
+        from llama_index.llms.gemini import Gemini
+
+        key = api_key or self._ensure_gemini_pool().current_key()
+        if key not in self._gemini_llms:
             model = self._settings.gemini_model
             if not model.startswith("models/"):
                 model = f"models/{model}"
-            self._gemini_llm = Gemini(
+            self._gemini_llms[key] = Gemini(
                 model=model,
-                api_key=self._settings.gemini_api_key,
+                api_key=key,
                 temperature=0.7,
                 max_tokens=self._settings.llm_max_tokens,
             )
-        return self._gemini_llm
+        return self._gemini_llms[key]
 
     def _require_configured(self) -> None:
         settings = self._settings
         primary = settings.llm_provider.strip().lower()
         if primary == "gemini":
-            if not (settings.gemini_api_key or settings.mistral_api_key or settings.openai_api_key or settings.llm_base_url):
+            if not (settings.gemini_key_pool or settings.mistral_api_key or settings.openai_api_key or settings.llm_base_url):
                 raise RuntimeError(
                     "No LLM configured: set GEMINI_API_KEY (MISTRAL_API_KEY "
                     "works as an automatic fallback)."
                 )
             return
         if primary == "mistral":
-            if not (settings.mistral_api_key or settings.gemini_api_key or settings.openai_api_key or settings.llm_base_url):
+            if not (settings.mistral_api_key or settings.gemini_key_pool or settings.openai_api_key or settings.llm_base_url):
                 raise RuntimeError(
                     "No LLM configured: set MISTRAL_API_KEY (GEMINI_API_KEY "
                     "works as an automatic fallback)."
                 )
             return
         if not (
-            settings.openai_api_key or settings.llm_base_url or settings.gemini_api_key or settings.mistral_api_key
+            settings.openai_api_key or settings.llm_base_url or settings.gemini_key_pool or settings.mistral_api_key
         ):
             raise RuntimeError(
                 "No LLM configured: set GEMINI_API_KEY, MISTRAL_API_KEY, "
@@ -377,13 +481,43 @@ class LLMService:
         return response.message.content or "{}"
 
     def _chat_gemini_once(self, messages: list[ChatMessage], max_tokens: int) -> str:
-        """Gemini call — used directly (LLM_PROVIDER=gemini) or as the
-        automatic fallback when Mistral/OpenAI fail. Output is forced into
-        the same JSON-ish contract via prompt; the parser coerce-guards it.
+        """Gemini call with intra-attempt key rotation on 429.
+
+        Before tenacity's backoff fires we try every key in the pool exactly
+        once per tenacity attempt.  This maximises throughput when multiple
+        keys share quota across projects:
+
+        - attempt 1 → key A (429) → key B (429) → key C (ok) ✓
+        - attempt 2 → key C (429, now cooling) → key A (ok) ✓
+
+        If all keys are exhausted within a single attempt, the last exception
+        is re-raised so tenacity can apply its normal exponential back-off
+        before trying again.
         """
-        llm = self._ensure_gemini()
-        response = llm.chat(messages)
-        return response.message.content or "{}"
+        pool = self._ensure_gemini_pool()
+        tried: set[str] = set()
+
+        while True:
+            key = pool.current_key()
+            tried.add(key)
+            try:
+                llm = self._ensure_gemini(api_key=key)
+                response = llm.chat(messages)
+                return response.message.content or "{}"
+            except Exception as exc:
+                code = _status_code(exc)
+                # Rotate on rate-limit / quota errors; re-raise anything else
+                if code == 429:
+                    pool.mark_limited(key)
+                    next_key = pool.rotate()
+                    if next_key not in tried:
+                        # More keys available — loop without letting tenacity wait
+                        logger.info(
+                            "Gemini 429 on current key; rotating to next key immediately."
+                        )
+                        continue
+                # All keys tried (or non-retryable error) — let tenacity handle it
+                raise
 
     # --- high level turn -------------------------------------------------
     def play_scenario_turn(
