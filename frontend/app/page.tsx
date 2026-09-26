@@ -136,7 +136,7 @@
         <main className="flex min-h-dvh items-center justify-center bg-background">
           <div className="text-center">
             <div className="mx-auto mb-4 h-10 w-10 animate-pulse rounded-xl bg-brand" />
-            <p className="text-sm text-[var(--text-muted)]">Loading Sema…</p>
+            <p className="text-sm text-[var(--text-muted)]">Loading Mzizi…</p>
           </div>
         </main>
       );
@@ -417,7 +417,7 @@
                     aria-label="Go to home"
                   >
                     <div className="h-[26px] w-[26px] rounded-[7px] bg-brand shadow-xs" />
-                    Sema
+                    Mzizi
                   </button>
                   <div className="flex items-center gap-2">
                     <button
